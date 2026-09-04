@@ -1,4 +1,4 @@
 # Open Sourse Software - (2026-2)
 
-[X] Make a repositories \n
-[X] write README.md
+- [O] Make a repositories
+- [O] write README.md
