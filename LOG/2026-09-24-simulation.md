@@ -64,7 +64,7 @@ A4 용지는 가로로 벽에 붙이고, 로봇을 켜서 호밍(영점)한 직�
 **원인과 조치.**
 1. `[WARN:COPY MODE]`는 WSLg가 공유 메모리 대신 복사 방식으로 창을 전달한다는 경고입니다. 이 상태에서 창이 투명하게, 즉 아무것도 그려지지 않은 채 떠 있었습니다. `wsl --shutdown`으로 WSLg를 다시 시작하자 경고가 사라지고 사용자 화면에 RViz가 보였습니다.
 2. 재발에 대비해 `run_rviz.sh`는 기본적으로 소프트웨어 렌더링(`LIBGL_ALWAYS_SOFTWARE=1`)을 씁니다. GPU를 쓰려면 `MIROBOT_RVIZ_GPU=1`로 실행합니다.
-3. Windows에서 Python으로 `run_rviz.sh`를 수정하면서 줄바꿈이 CRLF로 바뀌어, bash가 스크립트를 실행하지 못했습니다(`$'': command not found`). LF로 되돌리고 `.gitattributes`(`*.sh text eol=lf`)를 추가했습니다.
+3. Windows에서 Python으로 `run_rviz.sh`를 수정하면서 줄바꿈이 CRLF로 바뀌어, bash가 스크립트를 실행하지 못했습니다(`$'\r': command not found`). LF로 되돌리고 `.gitattributes`(`*.sh text eol=lf`)를 추가했습니다.
 
 ### 펜 끝 자국 표시
 
