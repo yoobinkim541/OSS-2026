@@ -1,0 +1,797 @@
+{
+  "schema_version": 1,
+  "units": "mm",
+  "paper": {
+    "size": "A4",
+    "orientation": "landscape"
+  },
+  "coordinate_frame": {
+    "origin": "paper_center",
+    "horizontal_axis": "robot_Y",
+    "vertical_axis": "robot_Z",
+    "shape_center_alignment": "bounding_box",
+    "robot_normal_axis": "robot_X"
+  },
+  "execution_notes": {
+    "recommended_start": "pen_up",
+    "approach_retract_mm": 2.0,
+    "approach_retract_status": "initial trial, not yet visually verified",
+    "preserve_aspect_ratio": true,
+    "recalibrate_if_paper_or_arm_moves": true
+  },
+  "shapes": [
+    {
+      "id": "circle_100mm_centered",
+      "type": "circle",
+      "width_mm": 100.0,
+      "height_mm": 100.0,
+      "path_closed": true,
+      "status": "centered reusable template; previous physical 100mm run was not page-centered",
+      "points_yz_mm": [
+        {
+          "y_mm": 50.0,
+          "z_mm": 0.0
+        },
+        {
+          "y_mm": 49.7592,
+          "z_mm": 4.9009
+        },
+        {
+          "y_mm": 49.0393,
+          "z_mm": 9.7545
+        },
+        {
+          "y_mm": 47.847,
+          "z_mm": 14.5142
+        },
+        {
+          "y_mm": 46.194,
+          "z_mm": 19.1342
+        },
+        {
+          "y_mm": 44.0961,
+          "z_mm": 23.5698
+        },
+        {
+          "y_mm": 41.5735,
+          "z_mm": 27.7785
+        },
+        {
+          "y_mm": 38.6505,
+          "z_mm": 31.7197
+        },
+        {
+          "y_mm": 35.3553,
+          "z_mm": 35.3553
+        },
+        {
+          "y_mm": 31.7197,
+          "z_mm": 38.6505
+        },
+        {
+          "y_mm": 27.7785,
+          "z_mm": 41.5735
+        },
+        {
+          "y_mm": 23.5698,
+          "z_mm": 44.0961
+        },
+        {
+          "y_mm": 19.1342,
+          "z_mm": 46.194
+        },
+        {
+          "y_mm": 14.5142,
+          "z_mm": 47.847
+        },
+        {
+          "y_mm": 9.7545,
+          "z_mm": 49.0393
+        },
+        {
+          "y_mm": 4.9009,
+          "z_mm": 49.7592
+        },
+        {
+          "y_mm": 0.0,
+          "z_mm": 50.0
+        },
+        {
+          "y_mm": -4.9009,
+          "z_mm": 49.7592
+        },
+        {
+          "y_mm": -9.7545,
+          "z_mm": 49.0393
+        },
+        {
+          "y_mm": -14.5142,
+          "z_mm": 47.847
+        },
+        {
+          "y_mm": -19.1342,
+          "z_mm": 46.194
+        },
+        {
+          "y_mm": -23.5698,
+          "z_mm": 44.0961
+        },
+        {
+          "y_mm": -27.7785,
+          "z_mm": 41.5735
+        },
+        {
+          "y_mm": -31.7197,
+          "z_mm": 38.6505
+        },
+        {
+          "y_mm": -35.3553,
+          "z_mm": 35.3553
+        },
+        {
+          "y_mm": -38.6505,
+          "z_mm": 31.7197
+        },
+        {
+          "y_mm": -41.5735,
+          "z_mm": 27.7785
+        },
+        {
+          "y_mm": -44.0961,
+          "z_mm": 23.5698
+        },
+        {
+          "y_mm": -46.194,
+          "z_mm": 19.1342
+        },
+        {
+          "y_mm": -47.847,
+          "z_mm": 14.5142
+        },
+        {
+          "y_mm": -49.0393,
+          "z_mm": 9.7545
+        },
+        {
+          "y_mm": -49.7592,
+          "z_mm": 4.9009
+        },
+        {
+          "y_mm": -50.0,
+          "z_mm": 0.0
+        },
+        {
+          "y_mm": -49.7592,
+          "z_mm": -4.9009
+        },
+        {
+          "y_mm": -49.0393,
+          "z_mm": -9.7545
+        },
+        {
+          "y_mm": -47.847,
+          "z_mm": -14.5142
+        },
+        {
+          "y_mm": -46.194,
+          "z_mm": -19.1342
+        },
+        {
+          "y_mm": -44.0961,
+          "z_mm": -23.5698
+        },
+        {
+          "y_mm": -41.5735,
+          "z_mm": -27.7785
+        },
+        {
+          "y_mm": -38.6505,
+          "z_mm": -31.7197
+        },
+        {
+          "y_mm": -35.3553,
+          "z_mm": -35.3553
+        },
+        {
+          "y_mm": -31.7197,
+          "z_mm": -38.6505
+        },
+        {
+          "y_mm": -27.7785,
+          "z_mm": -41.5735
+        },
+        {
+          "y_mm": -23.5698,
+          "z_mm": -44.0961
+        },
+        {
+          "y_mm": -19.1342,
+          "z_mm": -46.194
+        },
+        {
+          "y_mm": -14.5142,
+          "z_mm": -47.847
+        },
+        {
+          "y_mm": -9.7545,
+          "z_mm": -49.0393
+        },
+        {
+          "y_mm": -4.9009,
+          "z_mm": -49.7592
+        },
+        {
+          "y_mm": -0.0,
+          "z_mm": -50.0
+        },
+        {
+          "y_mm": 4.9009,
+          "z_mm": -49.7592
+        },
+        {
+          "y_mm": 9.7545,
+          "z_mm": -49.0393
+        },
+        {
+          "y_mm": 14.5142,
+          "z_mm": -47.847
+        },
+        {
+          "y_mm": 19.1342,
+          "z_mm": -46.194
+        },
+        {
+          "y_mm": 23.5698,
+          "z_mm": -44.0961
+        },
+        {
+          "y_mm": 27.7785,
+          "z_mm": -41.5735
+        },
+        {
+          "y_mm": 31.7197,
+          "z_mm": -38.6505
+        },
+        {
+          "y_mm": 35.3553,
+          "z_mm": -35.3553
+        },
+        {
+          "y_mm": 38.6505,
+          "z_mm": -31.7197
+        },
+        {
+          "y_mm": 41.5735,
+          "z_mm": -27.7785
+        },
+        {
+          "y_mm": 44.0961,
+          "z_mm": -23.5698
+        },
+        {
+          "y_mm": 46.194,
+          "z_mm": -19.1342
+        },
+        {
+          "y_mm": 47.847,
+          "z_mm": -14.5142
+        },
+        {
+          "y_mm": 49.0393,
+          "z_mm": -9.7545
+        },
+        {
+          "y_mm": 49.7592,
+          "z_mm": -4.9009
+        },
+        {
+          "y_mm": 50.0,
+          "z_mm": -0.0
+        }
+      ]
+    },
+    {
+      "id": "heart_70x60mm_centered",
+      "type": "heart_outline",
+      "width_mm": 70.0,
+      "height_mm": 60.0,
+      "path_closed": true,
+      "start_point": "bottom_cusp",
+      "status": "latest 57-point ack-streamed execution completed; visual ink and pen-slip verification pending",
+      "points_yz_mm": [
+        {
+          "y_mm": 0.0,
+          "z_mm": -30.0
+        },
+        {
+          "y_mm": -1.3529,
+          "z_mm": -26.4004
+        },
+        {
+          "y_mm": -3.5636,
+          "z_mm": -23.2249
+        },
+        {
+          "y_mm": -6.1499,
+          "z_mm": -20.3435
+        },
+        {
+          "y_mm": -8.948,
+          "z_mm": -17.666
+        },
+        {
+          "y_mm": -11.8709,
+          "z_mm": -15.1247
+        },
+        {
+          "y_mm": -14.862,
+          "z_mm": -12.6638
+        },
+        {
+          "y_mm": -17.877,
+          "z_mm": -10.2322
+        },
+        {
+          "y_mm": -20.8756,
+          "z_mm": -7.7804
+        },
+        {
+          "y_mm": -23.8147,
+          "z_mm": -5.2579
+        },
+        {
+          "y_mm": -26.6397,
+          "z_mm": -2.6086
+        },
+        {
+          "y_mm": -29.2756,
+          "z_mm": 0.2281
+        },
+        {
+          "y_mm": -31.6115,
+          "z_mm": 3.3148
+        },
+        {
+          "y_mm": -33.4867,
+          "z_mm": 6.6989
+        },
+        {
+          "y_mm": -34.6828,
+          "z_mm": 10.375
+        },
+        {
+          "y_mm": -34.9771,
+          "z_mm": 14.2265
+        },
+        {
+          "y_mm": -34.2633,
+          "z_mm": 18.0217
+        },
+        {
+          "y_mm": -32.5994,
+          "z_mm": 21.5082
+        },
+        {
+          "y_mm": -30.1619,
+          "z_mm": 24.5076
+        },
+        {
+          "y_mm": -27.1325,
+          "z_mm": 26.9098
+        },
+        {
+          "y_mm": -23.6733,
+          "z_mm": 28.6374
+        },
+        {
+          "y_mm": -19.9348,
+          "z_mm": 29.6233
+        },
+        {
+          "y_mm": -16.0734,
+          "z_mm": 29.8073
+        },
+        {
+          "y_mm": -12.2639,
+          "z_mm": 29.1532
+        },
+        {
+          "y_mm": -8.6923,
+          "z_mm": 27.6752
+        },
+        {
+          "y_mm": -5.5339,
+          "z_mm": 25.4466
+        },
+        {
+          "y_mm": -2.9292,
+          "z_mm": 22.5901
+        },
+        {
+          "y_mm": -1.002,
+          "z_mm": 19.2396
+        },
+        {
+          "y_mm": 0.0,
+          "z_mm": 15.5172
+        },
+        {
+          "y_mm": 1.002,
+          "z_mm": 19.2396
+        },
+        {
+          "y_mm": 2.9292,
+          "z_mm": 22.5901
+        },
+        {
+          "y_mm": 5.5339,
+          "z_mm": 25.4466
+        },
+        {
+          "y_mm": 8.6923,
+          "z_mm": 27.6752
+        },
+        {
+          "y_mm": 12.2639,
+          "z_mm": 29.1532
+        },
+        {
+          "y_mm": 16.0734,
+          "z_mm": 29.8073
+        },
+        {
+          "y_mm": 19.9348,
+          "z_mm": 29.6233
+        },
+        {
+          "y_mm": 23.6733,
+          "z_mm": 28.6374
+        },
+        {
+          "y_mm": 27.1325,
+          "z_mm": 26.9098
+        },
+        {
+          "y_mm": 30.1619,
+          "z_mm": 24.5076
+        },
+        {
+          "y_mm": 32.5994,
+          "z_mm": 21.5082
+        },
+        {
+          "y_mm": 34.2633,
+          "z_mm": 18.0217
+        },
+        {
+          "y_mm": 34.9771,
+          "z_mm": 14.2265
+        },
+        {
+          "y_mm": 34.6828,
+          "z_mm": 10.375
+        },
+        {
+          "y_mm": 33.4867,
+          "z_mm": 6.6989
+        },
+        {
+          "y_mm": 31.6115,
+          "z_mm": 3.3148
+        },
+        {
+          "y_mm": 29.2756,
+          "z_mm": 0.2281
+        },
+        {
+          "y_mm": 26.6397,
+          "z_mm": -2.6086
+        },
+        {
+          "y_mm": 23.8147,
+          "z_mm": -5.2579
+        },
+        {
+          "y_mm": 20.8756,
+          "z_mm": -7.7804
+        },
+        {
+          "y_mm": 17.877,
+          "z_mm": -10.2322
+        },
+        {
+          "y_mm": 14.862,
+          "z_mm": -12.6638
+        },
+        {
+          "y_mm": 11.8709,
+          "z_mm": -15.1247
+        },
+        {
+          "y_mm": 8.948,
+          "z_mm": -17.666
+        },
+        {
+          "y_mm": 6.1499,
+          "z_mm": -20.3435
+        },
+        {
+          "y_mm": 3.5636,
+          "z_mm": -23.2249
+        },
+        {
+          "y_mm": 1.3529,
+          "z_mm": -26.4004
+        },
+        {
+          "y_mm": 0.0,
+          "z_mm": -30.0
+        }
+      ]
+    }
+  ],
+  "last_execution": {
+    "shape_id": "heart_70x60mm_centered",
+    "completed_at_local": "2026-09-24T00:49:58.6325584+09:00",
+    "result": "all 56 contour moves acknowledged; endpoint verified; returned to center; controller Idle",
+    "visual_verification": "pending current-run photo",
+    "start_tcp_mm": {
+      "x": 198.668,
+      "y": 0.0,
+      "z": 230.477
+    },
+    "end_tcp_mm": {
+      "x": 198.668,
+      "y": 0.0,
+      "z": 230.477
+    },
+    "shape_center": "paper center",
+    "dimensions_mm": {
+      "width": 70,
+      "height": 60
+    },
+    "contour_points": 57,
+    "contour_delivery": "ack-paced G-code stream; no idle wait between contour points",
+    "contour_feed_mm_per_min": 300,
+    "commanded_orientation_rpy_deg": {
+      "rx": 0,
+      "ry": 0,
+      "rz": 0
+    },
+    "pen_up_clearance_mm": 2.5,
+    "pen_down_position_x_mm": 198.668,
+    "pressure_change_vs_baseline_mm": 0,
+    "correction": "previous 2.5mm value was retract clearance; returning by 2.5mm restored baseline and did not add pressure"
+  },
+  "execution_history": [
+    {
+      "shape_id": "heart_70x60mm_centered",
+      "completed_at_local": "2026-09-23T23:40:19.4547674+09:00",
+      "result": "all 56 contour segments completed; returned to center; controller Idle",
+      "visual_ink_verification": "not available",
+      "start_and_end_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "pen_normal_axis": "X",
+      "approach_trial_mm": 2.0,
+      "contour_feed_mm_per_min": 600,
+      "coordinate_command": "M20 G91 G1"
+    },
+    {
+      "shape_id": "heart_70x60mm_centered",
+      "completed_at_local": "2026-09-24T00:05:55.8724335+09:00",
+      "result": "all 56 contour segments completed; returned to paper center; controller Idle",
+      "pen_cap_open": true,
+      "visual_ink_verification": "not available",
+      "start_tcp_mm": {
+        "x": 196.678,
+        "y": 0.0,
+        "z": 200.43
+      },
+      "end_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "shape_center": "paper center",
+      "dimensions_mm": {
+        "width": 70,
+        "height": 60
+      },
+      "normal_axis": "robot_X",
+      "approach_trial_mm": 2.0,
+      "contour_feed_mm_per_min": 600,
+      "coordinate_command": "M20 G91 G1"
+    },
+    {
+      "shape_id": "heart_70x60mm_centered",
+      "completed_at_local": "2026-09-24T00:05:55.8724335+09:00",
+      "result": "all 56 contour segments completed; returned to paper center; controller Idle",
+      "pen_cap_open": true,
+      "visual_ink_verification": "not available",
+      "start_tcp_mm": {
+        "x": 196.678,
+        "y": 0.0,
+        "z": 200.43
+      },
+      "end_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "shape_center": "paper center",
+      "dimensions_mm": {
+        "width": 70,
+        "height": 60
+      },
+      "normal_axis": "robot_X",
+      "approach_trial_mm": 2.0,
+      "contour_feed_mm_per_min": 600,
+      "coordinate_command": "M20 G91 G1"
+    },
+    {
+      "shape_id": "heart_70x60mm_centered",
+      "completed_at_local": "2026-09-24T00:11:15.0998786+09:00",
+      "result": "all 56 contour segments completed; returned to center; controller Idle",
+      "pen_cap_open": true,
+      "visual_ink_and_alignment_verification": "not available",
+      "start_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "end_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "shape_center": "paper center",
+      "dimensions_mm": {
+        "width": 70,
+        "height": 60
+      },
+      "commanded_orientation_rpy_deg": {
+        "rx": 0,
+        "ry": 0,
+        "rz": 0
+      },
+      "normal_approach_trial_mm": 2.5,
+      "previous_normal_approach_trial_mm": 2.0,
+      "contour_feed_mm_per_min": 400,
+      "coordinate_command": "M20 G91 G1"
+    },
+    {
+      "shape_id": "heart_70x60mm_centered",
+      "completed_at_local": "2026-09-24T00:11:15.0998786+09:00",
+      "result": "all 56 contour segments completed; returned to center; controller Idle",
+      "pen_cap_open": true,
+      "visual_ink_and_alignment_verification": "not available",
+      "start_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "end_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "shape_center": "paper center",
+      "dimensions_mm": {
+        "width": 70,
+        "height": 60
+      },
+      "commanded_orientation_rpy_deg": {
+        "rx": 0,
+        "ry": 0,
+        "rz": 0
+      },
+      "normal_approach_trial_mm": 2.5,
+      "previous_normal_approach_trial_mm": 2.0,
+      "contour_feed_mm_per_min": 400,
+      "coordinate_command": "M20 G91 G1",
+      "user_photo_review": "Photo shows a discernible heart trace, but the line appears uneven with gaps and overlapping marks; physical pen alignment and pressure response remain unverified.",
+      "next_calibration": "Before another full heart, calibrate actual pen-tip offset and holder orientation with a short straight test line on a clean area; do not increase normal approach until contact is observed."
+    },
+    {
+      "shape_id": "heart_70x60mm_centered",
+      "completed_at_local": "2026-09-24T00:43:33.4027521+09:00",
+      "result": "all 30 contour segments completed; returned to center; controller Idle",
+      "visual_verification": "pending user photo",
+      "start_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "end_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "shape_center": "paper center",
+      "nominal_dimensions_mm": {
+        "width": 70,
+        "height": 60
+      },
+      "source_points": 57,
+      "executed_points": 31,
+      "simplification": "every second arc-length point, retaining left/right extrema",
+      "commanded_orientation_rpy_deg": {
+        "rx": 0,
+        "ry": 0,
+        "rz": 0
+      },
+      "normal_approach_trial_mm": 2.5,
+      "contour_feed_mm_per_min": 300,
+      "reason": "reduce stop-start events while preserving outline landmarks"
+    },
+    {
+      "shape_id": "heart_70x60mm_centered",
+      "completed_at_local": "2026-09-24T00:43:33.4027521+09:00",
+      "result": "all 30 contour segments completed; returned to center; controller Idle",
+      "visual_verification": "pending user photo",
+      "start_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "end_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "shape_center": "paper center",
+      "nominal_dimensions_mm": {
+        "width": 70,
+        "height": 60
+      },
+      "source_points": 57,
+      "executed_points": 31,
+      "simplification": "every second arc-length point, retaining left/right extrema",
+      "commanded_orientation_rpy_deg": {
+        "rx": 0,
+        "ry": 0,
+        "rz": 0
+      },
+      "normal_approach_trial_mm": 2.5,
+      "contour_feed_mm_per_min": 300,
+      "reason": "reduce stop-start events while preserving outline landmarks"
+    },
+    {
+      "shape_id": "heart_70x60mm_centered",
+      "completed_at_local": "2026-09-24T00:49:58.6325584+09:00",
+      "result": "all 56 contour moves acknowledged; endpoint verified; returned to center; controller Idle",
+      "visual_verification": "pending current-run photo",
+      "start_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "end_tcp_mm": {
+        "x": 198.668,
+        "y": 0.0,
+        "z": 230.477
+      },
+      "shape_center": "paper center",
+      "dimensions_mm": {
+        "width": 70,
+        "height": 60
+      },
+      "contour_points": 57,
+      "contour_delivery": "ack-paced G-code stream; no idle wait between contour points",
+      "contour_feed_mm_per_min": 300,
+      "commanded_orientation_rpy_deg": {
+        "rx": 0,
+        "ry": 0,
+        "rz": 0
+      },
+      "pen_up_clearance_mm": 2.5,
+      "pen_down_position_x_mm": 198.668,
+      "pressure_change_vs_baseline_mm": 0,
+      "correction": "previous 2.5mm value was retract clearance; returning by 2.5mm restored baseline and did not add pressure"
+    }
+  ],
+  "physical_calibration_note": "If the pen slides within the holder, secure it mechanically; for a wall-mounted sheet, a thin compliant backing pad can reduce hard contact. Do not interpret retract distance as drawing pressure."
+}

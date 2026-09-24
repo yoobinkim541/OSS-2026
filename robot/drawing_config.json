@@ -1,0 +1,34 @@
+{
+ "_about": "robot/draw_executor.py 설정. 값을 바꾸면 LOG에 이유와 결과를 기록할 것.",
+ "port": "COM9",
+ "baud": 115200,
+
+ "paper_center_tcp_mm": {"x": 198.668, "y": 0.0, "z": 230.477},
+ "_paper_center_tcp_note": "2026-09-24 하트 테스트에서 기록된 종이 중심의 펜 접촉 기준 TCP. 종이/로봇을 옮기면 다시 측정.",
+
+ "orientation_deg": {"a": 0.0, "b": 0.0, "c": 0.0},
+
+ "paper_x_to_robot_y_sign": -1,
+ "paper_y_to_robot_z_sign": 1,
+ "_axis_sign_note": "미검증. 로봇이 +X(벽) 방향을 바라보는 오른손 좌표계라면, 종이를 정면에서 볼 때 오른쪽은 로봇 -Y. 원·하트는 좌우 대칭이라 이 부호를 확인하지 못했음. trajectories/orientation-test-F.json을 그려 F가 거울상이 아닌지 확인한 뒤 _axis_sign_status를 verified로 바꿀 것.",
+ "_axis_sign_status": "unverified",
+
+ "pen": {
+  "up_clearance_mm": 2.5,
+  "retract_x_sign": -1,
+  "down_extra_mm": 0.0
+ },
+ "_pen_note": "하트 테스트 기록: 접촉 X=198.668, 접근 전 X=196.678 -> 벽에서 떨어지는 방향은 -X. down_extra_mm는 접촉 기준보다 더 누르는 양(+이면 벽 쪽). 1mm 이하로만 조정.",
+
+ "plane_compensation": {"a_per_mm_y": 0.0, "b_per_mm_z": 0.0, "status": "pending_measurement"},
+ "_plane_note": "X_contact = center.x + a*dY + b*dZ + down_extra (dY,dZ = 종이 중심에서의 로봇 Y,Z 변위). 5점 접촉 측정 후 채울 것.",
+
+ "feeds_mm_per_min": {"draw": 300, "travel": 600, "approach": 200},
+
+ "limits": {"max_abs_paper_x_mm": 50.0, "max_abs_paper_y_mm": 50.0},
+ "_limits_note": "끝까지 실행된 가장 큰 도형이 100mm 원이라 +-50mm로 제한. 더 크게 그리려면 모서리 도달(Soft limit)을 먼저 시험.",
+
+ "max_start_offset_mm": 5.0,
+ "ack_timeout_s": 15.0,
+ "idle_timeout_s": 180.0
+}

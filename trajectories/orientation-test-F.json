@@ -1,0 +1,59 @@
+{
+ "schema_version": 1,
+ "kind": "sketch_strokes",
+ "created_local": "2026-09-24T22:35:31+09:00",
+ "units": "mm",
+ "paper": {
+  "size": "A4",
+  "orientation": "landscape"
+ },
+ "coordinate_frame": {
+  "origin": "paper_center",
+  "x_axis": "paper_right_positive (viewed from the front of the paper)",
+  "y_axis": "paper_up_positive",
+  "robot_mapping": "done by robot/draw_executor.py using robot/drawing_config.json"
+ },
+ "placement": {
+  "alignment": "authored directly in paper mm",
+  "drawing_width_mm": 20,
+  "drawing_height_mm": 30
+ },
+ "source": {
+  "purpose": "좌우(paper_x_to_robot_y_sign)·상하 부호 확인. 종이 정면에서 F가 똑바로 보여야 정상. 거울상이면 Y 부호, 뒤집혔으면 Z 부호가 반대."
+ },
+ "metrics": {
+  "stroke_count": 2
+ },
+ "strokes": [
+  {
+   "closed": false,
+   "points_xy_mm": [
+    [
+     -10.0,
+     -15.0
+    ],
+    [
+     -10.0,
+     15.0
+    ],
+    [
+     10.0,
+     15.0
+    ]
+   ]
+  },
+  {
+   "closed": false,
+   "points_xy_mm": [
+    [
+     -10.0,
+     0.0
+    ],
+    [
+     5.0,
+     0.0
+    ]
+   ]
+  }
+ ]
+}

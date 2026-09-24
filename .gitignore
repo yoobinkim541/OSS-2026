@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+# 생성물
+out/
+*.gcode
+opencv_lesson1_output/
+*_strokes_preview.png
+# 출처 미확인 일러스트가 포함된 실험 결과 (로컬 보관)
+CV/experiments/*.png
