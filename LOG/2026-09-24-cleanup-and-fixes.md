@@ -32,7 +32,8 @@
 | 루트의 제어 스크립트 | `mirobot_control.py`, `pump_test.py`를 `robot/`로 이동하고 사용법 경로 수정. 코드 내용은 바꾸지 않음 |
 | CV 단계 실험 | `sketch_step1~3.py`와 결과 이미지를 `CV/experiments/`로 이동. 학습 기록이라 내용은 그대로 둠 |
 | 설계 문서 | 중복된 `## 10.`을 `## 11.`로 고침. `## 12. 구현 정리와 결정 갱신` 추가 |
-| 저장소 | `git init`, `.gitignore`, `requirements.txt`, `README.md` 추가. 커밋은 아직 하지 않음 |
+| 저장소 | `git init`, `.gitignore`, `requirements.txt`, `README.md` 추가. [yoobinkim541/OSS-2026](https://github.com/yoobinkim541/OSS-2026)의 기존 기록 위에 커밋해 push함 (c0f633f). README는 기존 수업 체크리스트를 유지하고 그 아래 프로젝트 설명을 붙임 |
+| 공개 제외 | `CV/experiments/*.png` 6장은 출처를 확인하지 못한 일러스트 원본이 들어 있어, 공개 저장소에는 올리지 않고 로컬에만 둠(`.gitignore`) |
 | 테스트 | `tests/`에 unittest 21개 추가. pytest가 설치돼 있지 않아 표준 라이브러리 사용 |
 
 `trajectories/shape-library.json`은 수정하지 않았습니다.
