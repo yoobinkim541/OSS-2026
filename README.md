@@ -57,6 +57,22 @@ python robot/draw_executor.py out/photo.json --execute
 
 실행 결과는 `LOG/runs/`에 저장됩니다. 처음 실행할 때는 `trajectories/orientation-test-F.json`으로 좌우·상하 방향부터 확인하세요.
 
+### 3D 시뮬레이션 (로봇 없이 확인)
+
+실행기와 같은 경로로 Mirobot 기구학(IK)을 풀어 관절 한계(Soft limit)를 넘는지 검사합니다.
+
+```bash
+python sim/mirobot_sim.py out/photo.json --plot out/joints.png --gif out/sim.gif
+python sim/mirobot_sim.py --reach-map out/reach_map.png
+```
+
+RViz에서 실제 Mirobot 3D 모델로 재생하려면 궤적을 내보낸 뒤 WSL2(ROS 2 Humble)에서 실행합니다.
+
+```bash
+python sim/mirobot_sim.py out/photo.json --export out/photo_traj.json
+wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/c/Users/asus/Desktop/Mirobot && bash sim/run_rviz.sh out/photo_traj.json 10"
+```
+
 ### 테스트
 
 ```bash
@@ -69,6 +85,7 @@ python -m unittest discover -s tests -v
 |---|---|
 | `CV/` | 이미지 → 획 파이프라인, GUI, 명령줄 도구 (`experiments/`는 학습 단계 스크립트) |
 | `robot/` | 드로잉 실행기와 설정, 초기 시리얼·그리퍼·펌프 시험 코드 |
+| `sim/` | 기구학 시뮬레이터, 도달 지도, RViz 재생 |
 | `trajectories/` | 도형 템플릿과 테스트 경로 |
 | `docs/` | 설계 문서, OpenCV 학습 자료 |
 | `LOG/` | 날짜별 작업 기록, 실행 기록 |

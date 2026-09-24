@@ -10,10 +10,13 @@ CV/make_strokes.py 또는 GUI가 만든 sketch_strokes JSON(종이 중심 기준
     python robot/draw_executor.py trajectories/orientation-test-F.json
     python robot/draw_executor.py out/photo_strokes.json --execute
 
-실행 전 준비 (설계 문서 / mirobot_control.py와 같은 규칙):
-  1. 전원을 켜고 중앙 버튼 2초로 수동 호밍 -> Idle 확인
-  2. 펜 끝을 종이 중앙에 가볍게 닿게 둔다 (drawing_config.json의 paper_center_tcp_mm)
-  3. 다른 프로그램이 COM 포트를 열고 있지 않은지 확인 (포트를 새로 열면 보드가 리셋됨)
+실행 순서 (설계 문서 / mirobot_control.py와 같은 규칙):
+  1. 다른 프로그램이 COM 포트를 열고 있지 않은지 확인
+  2. --execute로 실행 -> 포트를 열면 보드가 리셋돼 Alarm 상태가 됨
+  3. 안내가 나오면 중앙 버튼 2초로 호밍 -> Idle이 되면 자동으로 다음 단계
+  4. 홈 자세 TCP가 종이 중심(drawing_config.json의 paper_center_tcp_mm)과 같아야
+     하므로, 홈 자세에서 펜 끝이 종이 중앙에 오도록 종이를 고정해 둔다
+  5. 확인 질문에 yes 입력
 
 안전 규칙:
   - 자동 호밍을 하지 않습니다. Idle이 아니면 시작하지 않습니다.
@@ -213,6 +216,25 @@ class MirobotLink:
                 return
         raise ControllerError(f"ok 응답 시간 초과: {line}")
 
+    def wait_for_homing(self, timeout, progress=print):
+        """포트를 열면 보드가 리셋돼 Alarm으로 시작합니다. 사용자가 물리 버튼으로
+        호밍해 Idle이 될 때까지 기다립니다 (자동 호밍 명령은 보내지 않음).
+        반환: (상태, TCP). 시간 안에 Idle이 안 되면 마지막 상태를 그대로 반환."""
+        deadline = time.monotonic() + timeout
+        last = None
+        state, tcp = "unknown", None
+        while time.monotonic() < deadline:
+            state, tcp, _ = self.query_status()
+            if state != last:
+                progress(f"  컨트롤러 상태: {state}")
+                if state == "Alarm":
+                    progress("  -> 중앙 네비게이션 버튼을 2초 눌러 호밍하세요. Idle이 되면 자동으로 계속합니다.")
+                last = state
+            if state == "Idle":
+                break
+            time.sleep(1.0)
+        return state, tcp
+
     def close(self):
         self.ser.close()
 
@@ -289,10 +311,10 @@ def main():
 
     link = MirobotLink.open(cfg["port"], cfg["baud"], args.verbose)
     try:
-        state, tcp, raw = link.query_status()
+        state, tcp = link.wait_for_homing(cfg["idle_timeout_s"])
         print(f"컨트롤러 상태: {state}, TCP: {tcp}")
         if state != "Idle":
-            print("Idle이 아니므로 시작하지 않습니다. (Alarm이면 물리 버튼으로 호밍)")
+            print("Idle이 되지 않아 시작하지 않습니다.")
             return 3
         if tcp is None:
             print("TCP 좌표를 읽지 못해 시작 위치를 확인할 수 없습니다. 중단합니다.")

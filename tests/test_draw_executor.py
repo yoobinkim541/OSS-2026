@@ -99,6 +99,27 @@ class ExecuteTest(unittest.TestCase):
         self.assertEqual(state, "Idle")
         self.assertEqual(tcp, (198.668, 0.0, 230.477))
 
+    def test_waits_for_manual_homing(self):
+        # 포트를 열면 리셋 -> Alarm -> (사용자 호밍) -> Home -> Idle
+        fake = FakeSerial()
+        states = iter(["Alarm", "Alarm", "Home", "Idle"])
+
+        def write(data, _orig=fake.write):
+            if data.decode().strip() == "?":
+                st = next(states)
+                fake.pending.append(FakeSerial.IDLE.replace("<Idle", f"<{st}"))
+                return
+            _orig(data)
+
+        fake.write = write
+        de.time.sleep, orig_sleep = (lambda *_: None), de.time.sleep
+        try:
+            state, tcp = de.MirobotLink(fake).wait_for_homing(5, progress=lambda *_: None)
+        finally:
+            de.time.sleep = orig_sleep
+        self.assertEqual(state, "Idle")
+        self.assertEqual(tcp, (198.668, 0.0, 230.477))
+
     def test_completes_with_acks(self):
         fake = FakeSerial()
         result = de.execute(de.MirobotLink(fake), self.cmds, self.cfg, progress=lambda *_: None)
