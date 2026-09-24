@@ -4,7 +4,7 @@
  "baud": 115200,
 
  "paper_center_tcp_mm": {"x": 198.668, "y": 0.0, "z": 230.477},
- "_paper_center_tcp_note": "2026-09-24 하트 테스트에서 기록된 종이 중심의 펜 접촉 기준 TCP. 종이/로봇을 옮기면 다시 측정.",
+ "_paper_center_tcp_note": "호밍(영점) 직후의 TCP = 종이 중심. 설치 규칙(2026-09-24 사용자 확정): A4를 가로로 벽에 붙이고, 호밍 직후 펜 끝이 종이 한가운데에 닿도록 종이 위치를 맞춘다. 값은 하트 테스트 때 컨트롤러가 보고한 홈 TCP. 종이/로봇을 옮기면 다시 맞출 것.",
 
  "orientation_deg": {"a": 0.0, "b": 0.0, "c": 0.0},
 
@@ -19,6 +19,9 @@
   "down_extra_mm": 0.0
  },
  "_pen_note": "하트 테스트 기록: 접촉 X=198.668, 접근 전 X=196.678 -> 벽에서 떨어지는 방향은 -X. down_extra_mm는 접촉 기준보다 더 누르는 양(+이면 벽 쪽). 1mm 이하로만 조정.",
+
+ "pen_tip_offset_mm": {"x": 100.0, "y": 0.0, "z": 0.0},
+ "_pen_tip_note": "플랜지(TCP) -> 펜 끝, 로봇 좌표계(A,B,C=0 자세 기준). 사용자 어림값(펜이 벽 쪽 수평, 약 100mm). sim 시각화에만 사용하고 실행기 명령에는 쓰지 않음.",
 
  "plane_compensation": {"a_per_mm_y": 0.0, "b_per_mm_z": 0.0, "status": "pending_measurement"},
  "_plane_note": "X_contact = center.x + a*dY + b*dZ + down_extra (dY,dZ = 종이 중심에서의 로봇 Y,Z 변위). 5점 접촉 측정 후 채울 것.",

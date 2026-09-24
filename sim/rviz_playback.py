@@ -3,7 +3,8 @@
 시뮬레이션 관절 궤적을 RViz의 Mirobot 3D 모델로 재생합니다 (WSL2 / ROS 2 Humble).
 
 sim/mirobot_sim.py --export 로 만든 JSON을 읽어 /joint_states를 발행하고,
-종이(A4 테두리)와 펜다운 궤적을 /sketch_markers로 표시합니다.
+종이(A4 테두리), 펜홀더+펜(플랜지 -> 펜 끝), 펜 끝이 종이에 남긴 자국을
+/sketch_markers로 표시합니다. 펜 끝 위치는 drawing_config.json의 pen_tip_offset_mm.
 보통은 sim/run_rviz.sh 로 robot_state_publisher, rviz2와 함께 실행합니다.
 
     python3 sim/rviz_playback.py traj.json --speed 10 --loop
@@ -43,8 +44,12 @@ class Playback(Node):
         self.timer = self.create_timer(period, self.tick)
         self.get_logger().info(f"{traj.get('source')}: {len(self.points)} samples, x{speed} speed")
 
+    @staticmethod
+    def tip(p):
+        return p.get("pen_tip_mm", p["tcp_mm"])
+
     def paper_marker(self):
-        c = self.points[0]["tcp_mm"]  # 시작점 = 종이 중심 (TCP 평면)
+        c = self.tip(self.points[0])  # 시작점 = 종이 중심에 펜 끝이 닿은 상태
         m = Marker(type=Marker.LINE_STRIP, action=Marker.ADD, ns="paper", id=0)
         m.header.frame_id = "base_link"
         m.scale.x = 0.002
@@ -62,6 +67,22 @@ class Playback(Node):
         m.points = [pt(p) for seg in self.trail for p in seg]
         return m
 
+    def pen_markers(self, p):
+        """펜홀더+펜 막대(플랜지 -> 펜 끝)와 펜 끝 구."""
+        pen = Marker(type=Marker.LINE_LIST, action=Marker.ADD, ns="pen", id=2)
+        pen.header.frame_id = "base_link"
+        pen.scale.x = 0.008
+        pen.color = ColorRGBA(r=0.95, g=0.65, b=0.05, a=1.0)
+        pen.points = [pt(p["tcp_mm"]), pt(self.tip(p))]
+        nib = Marker(type=Marker.SPHERE, action=Marker.ADD, ns="pen", id=3)
+        nib.header.frame_id = "base_link"
+        nib.pose.position = pt(self.tip(p))
+        nib.pose.orientation.w = 1.0
+        nib.scale.x = nib.scale.y = nib.scale.z = 0.006
+        down = p["pen_down"]
+        nib.color = ColorRGBA(r=0.9, g=0.2, b=0.15, a=1.0) if down else ColorRGBA(r=0.3, g=0.3, b=0.3, a=1.0)
+        return [pen, nib]
+
     def tick(self):
         if self.i >= len(self.points):
             if not self.loop:
@@ -69,13 +90,13 @@ class Playback(Node):
             self.i, self.trail = 0, []
         p = self.points[self.i]
         if self.i > 0 and p["pen_down"] and self.points[self.i - 1]["pen_down"]:
-            self.trail.append((self.points[self.i - 1]["tcp_mm"], p["tcp_mm"]))
+            self.trail.append((self.tip(self.points[self.i - 1]), self.tip(p)))
         js = JointState()
         js.header.stamp = self.get_clock().now().to_msg()
         js.name = self.traj["joint_names"]
         js.position = p["q"]
         self.js_pub.publish(js)
-        ma = MarkerArray(markers=[self.paper_marker(), self.trail_marker()])
+        ma = MarkerArray(markers=[self.paper_marker(), self.trail_marker(), *self.pen_markers(p)])
         for m in ma.markers:
             m.header.stamp = js.header.stamp
         self.mk_pub.publish(ma)

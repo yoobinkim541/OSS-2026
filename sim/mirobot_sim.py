@@ -137,6 +137,12 @@ def ik(target_mm, q0, r_goal=HOME_ROT, iters=100, tol_mm=1e-3):
 _GCODE_XYZ = __import__("re").compile(r"X([-\d.]+) Y([-\d.]+) Z([-\d.]+)")
 
 
+def pen_tip_offset(cfg):
+    """플랜지(TCP) -> 펜 끝 오프셋(로봇 좌표, mm). 자세가 고정이라 경로 내내 일정. 시각화 전용."""
+    o = cfg.get("pen_tip_offset_mm", {"x": 0.0, "y": 0.0, "z": 0.0})
+    return np.array([o["x"], o["y"], o["z"]], dtype=float)
+
+
 def plan_targets(strokes, cfg):
     """실행기와 같은 계획 -> [(xyz_mm, 설명, pen_down)]. 시작점은 종이 중심 펜다운(=사용자가 둔 위치)."""
     planner = de.Planner(cfg)
@@ -247,13 +253,14 @@ def save_animation(result, path, cfg, frames=90):
     samples = result["samples"]
     idx = np.linspace(0, len(samples) - 1, min(frames, len(samples))).astype(int)
     c = cfg["paper_center_tcp_mm"]
+    tip = pen_tip_offset(cfg)
     fig = plt.figure(figsize=(7, 6))
     ax = fig.add_subplot(111, projection="3d")
 
-    # 종이 (A4 가로, 로봇 X = 펜 접촉면 근처에 표시)
-    px = c["x"]
-    ys = np.array([-148.5, 148.5, 148.5, -148.5, -148.5]) + c["y"]
-    zs = np.array([-105, -105, 105, 105, -105]) + c["z"]
+    # 종이 (A4 가로) — 펜다운 때 펜 끝이 닿는 평면
+    px = c["x"] + tip[0]
+    ys = np.array([-148.5, 148.5, 148.5, -148.5, -148.5]) + c["y"] + tip[1]
+    zs = np.array([-105, -105, 105, 105, -105]) + c["z"] + tip[2]
 
     def draw(k):
         ax.cla()
@@ -261,12 +268,15 @@ def save_animation(result, path, cfg, frames=90):
         _, pts = fk_chain(samples[i][0], TOOL_OFFSET_MM)
         pts = np.array(pts)
         ax.plot([px] * 5, ys, zs, color="#999", lw=1)
-        trail = np.array([s[1] for s in samples[: i + 1] if s[3]]) if i else np.empty((0, 3))
+        trail = np.array([s[1] + tip for s in samples[: i + 1] if s[3]]) if i else np.empty((0, 3))
         if len(trail):
             # 펜다운 구간만 점으로 (획 사이 연결선이 생기지 않게)
             ax.scatter(trail[:, 0], trail[:, 1], trail[:, 2], s=2, color="#c0392b")
         ax.plot(pts[:, 0], pts[:, 1], pts[:, 2], "-o", color="#1f5fbf", lw=3, ms=4)
-        ax.set_xlim(-20, 260)
+        pen_end = pts[-1] + tip
+        ax.plot([pts[-1][0], pen_end[0]], [pts[-1][1], pen_end[1]], [pts[-1][2], pen_end[2]],
+                color="#e6a100", lw=4)  # 펜홀더 + 펜
+        ax.set_xlim(-20, 340)
         ax.set_ylim(-140, 140)
         ax.set_zlim(0, 330)
         ax.set_xlabel("X")
@@ -381,9 +391,12 @@ def main():
         save_animation(result, args.gif, cfg)
         print(f"3D 애니메이션: {args.gif}")
     if args.export:
+        tip = pen_tip_offset(cfg)
         traj = {
             "joint_names": JOINT_NAMES, "units": "rad", "step_mm": 1.0, "source": title,
+            "pen_tip_offset_mm": tip.tolist(),
             "points": [{"q": [round(float(v), 5) for v in s[0]], "tcp_mm": [round(float(v), 3) for v in s[1]],
+                        "pen_tip_mm": [round(float(v), 3) for v in s[1] + tip],
                         "pen_down": bool(s[3]), "command": s[2]} for s in result["samples"]],
         }
         args.export.write_text(json.dumps(traj, ensure_ascii=False), encoding="utf-8")
