@@ -268,7 +268,7 @@ class ToolboxTest(SessionTestBase):
 
     def test_errors_are_returned_not_raised(self):
         tb = AgentToolbox(SketchSession())
-        for name, args in (("view", {"kind": "paper"}), ("unknown", {}), ("delete_strokes", {"wrong": 1})):
+        for name, args in (("view", {"kind": "paper"}), ("unknown", {}), ("propose_edits", {"wrong": 1})):
             parts, err = tb.call(name, args)
             self.assertTrue(err)
             self.assertTrue(parts[0]["text"].startswith("오류"))
@@ -289,6 +289,30 @@ class ToolboxTest(SessionTestBase):
             parts, err = tb.call("view", {"kind": kind})
             self.assertFalse(err, kind)
             self.assertEqual(parts[1]["type"], "image")
+
+    def test_propose_view_apply_flow(self):
+        changes = []
+        s = self.new_session()
+        tb = AgentToolbox(s, on_change=changes.append)
+        rows = json.loads(tb.call("list_strokes", {"include_candidates": True})[0][0]["text"])["rows"]
+        stroke = next(r["id"] for r in rows if r["kind"] == "stroke")
+        parts, err = tb.call("propose_edits", {"ops": [{"op": "delete", "ids": [stroke]}]})
+        self.assertFalse(err, parts)
+        self.assertEqual([p["type"] for p in parts], ["text", "image"])       # 바뀌는 부위 미리보기
+        self.assertIn("proposals", changes)
+        parts, err = tb.call("apply_proposals", {})
+        self.assertFalse(err, parts)
+        self.assertEqual(s.table[stroke]["kind"], "candidate")
+        parts, err = tb.call("view", {"kind": "edit", "show_candidates": True, "overlay_original": 0.4})
+        self.assertFalse(err)
+        pts = json.loads(tb.call("get_stroke", {"id": stroke})[0][0]["text"])["points_mm"]
+        self.assertEqual(pts[0][0], 0)
+
+    def test_old_delete_tools_are_gone(self):
+        names = {t["name"] for t in TOOLS}
+        self.assertFalse(names & {"delete_strokes", "delete_region"})
+        self.assertTrue({"list_strokes", "get_stroke", "propose_edits", "apply_proposals",
+                         "discard_proposals"} <= names)
 
     def test_set_params_notifies_screen(self):
         changes = []
@@ -331,7 +355,8 @@ class BridgeAndMcpTest(SessionTestBase):
             self.assertEqual({t["name"] for t in r["result"]["tools"]}, {t["name"] for t in TOOLS})
             r = rpc(3, "tools/call", {"name": "view", "arguments": {"kind": "paper"}})
             self.assertEqual([c["type"] for c in r["result"]["content"]], ["text", "image"])
-            r = rpc(4, "tools/call", {"name": "delete_strokes", "arguments": {"ids": [10 ** 6]}})
+            r = rpc(4, "tools/call", {"name": "propose_edits",
+                                      "arguments": {"ops": [{"op": "delete", "ids": [10 ** 6]}]}})
             self.assertTrue(r["result"]["isError"])
         finally:
             p.stdin.close()

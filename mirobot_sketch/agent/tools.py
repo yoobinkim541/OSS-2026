@@ -24,10 +24,17 @@ SYSTEM_PROMPT = """당신은 사진을 로봇 팔(WLKATA Mirobot)이 펜으로 �
 작업 방식
 - 먼저 get_state로 현재 상태를 보고, view로 원본과 결과를 눈으로 확인하세요.
 - 설정을 바꾼 뒤에는 view로 결과를 다시 확인하고, 획 수·예상 시간의 변화를 사용자에게 알려 주세요.
-- 잡음·배경·글씨처럼 필요 없는 획은 view(kind="strokes", numbered=true)로 번호를 확인한 뒤
-  delete_strokes나 delete_region으로 지우세요. 좁은 영역은 region_mm로 확대해서 보세요.
-- 설정을 다시 처리하면 이전 편집(획 삭제)은 사라집니다. 설정을 먼저 정하고 편집은 마지막에 하세요.
-- 좌표는 종이 중심이 원점인 mm이며 x는 오른쪽, y는 위쪽이 +입니다.
+- 선을 다듬을 때:
+  1) view(kind="edit", overlay_original=0.4, show_candidates=true)로 원본 위의 획과 버린 선(후보)을 봅니다.
+  2) 문제 부위는 region_mm로 확대하고, list_strokes로 번호·이유를 확인합니다.
+  3) propose_edits로 제안하고 돌려받은 그림(빨강=사라짐, 초록=생김)으로 스스로 검토합니다.
+  4) 사용자에게 "초록 813·820은 머리카락 윤곽을 살리고, 빨강 5·8은 배경 잡음을 지웁니다"처럼 번호로 설명하고
+     확인을 기다립니다. 사용자가 "5번 빼고 적용"이라 하면 apply_proposals(exclude=[5]).
+  사용자가 바로 하라고 했을 때만 apply_now=true를 쓰세요.
+- 점 편집(move_point 등)은 get_stroke로 점 번호와 좌표를 확인한 뒤에 하세요.
+- 설정을 바꿔 다시 계산하면 번호가 새로 매겨지고 적용 전 제안은 취소됩니다(적용한 편집은 유지).
+  설정을 먼저 정하고 편집은 마지막에 하세요.
+- 좌표는 종이 중심이 원점인 mm이며 x는 오른쪽, y는 위쪽이 +입니다. ±60mm 밖은 거부됩니다.
 
 처리 단계 (view의 kind로 각 단계 결과를 볼 수 있음)
 - source 원본: rembg(배경 제거)
@@ -81,7 +88,8 @@ TOOLS = [
             "그림을 봅니다. kind: original(컬러 원본), 단계별 결과(source 원본 / prep 전처리 / edges 선 검출 / "
             "trace 뼈대·획, 연회색=버린 조각 / dedupe 겹침 제거, 연회색=빠진 조각 / merge 이어 붙이기 / "
             "simplify 단순화), edit(최종 획), paper(A4 종이 미리보기, 펜 굵기 반영), "
-            "strokes(획을 종이 mm 좌표로 확대, 10mm 격자, numbered=true면 번호, region_mm=[x0,y0,x1,y1]로 확대)."
+            "strokes(획을 종이 mm 좌표로 확대, 10mm 격자, numbered=true면 번호, region_mm=[x0,y0,x1,y1]로 확대). "
+            "edit는 현재 획(회색)과 번호, 제안(빨강=사라짐, 초록=생김)을 보여 줍니다."
         ),
         "parameters": {
             "type": "object",
@@ -89,6 +97,9 @@ TOOLS = [
                 "kind": {"type": "string", "enum": VIEW_KINDS},
                 "numbered": {"type": "boolean"},
                 "region_mm": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+                "show_candidates": {"type": "boolean", "description": "edit에서 버린 선(살릴 후보)을 회색 점선과 번호로"},
+                "overlay_original": {"type": "number", "minimum": 0, "maximum": 1,
+                                     "description": "edit에서 컬러 원본을 비치게 (0~1, 빠진 선 찾기에 좋음)"},
             },
             "required": ["kind"],
             "additionalProperties": False,
@@ -103,31 +114,56 @@ TOOLS = [
         "parameters": {"type": "object", "properties": param_schema(), "additionalProperties": False},
     },
     {
-        "name": "delete_strokes",
-        "description": "번호로 획을 지웁니다(번호는 view kind=strokes numbered=true에서 확인). 지운 뒤 번호가 다시 매겨집니다.",
-        "parameters": {
-            "type": "object",
-            "properties": {"ids": {"type": "array", "items": {"type": "integer"}, "minItems": 1}},
-            "required": ["ids"],
-            "additionalProperties": False,
-        },
+        "name": "list_strokes",
+        "description": "획(과 후보)의 표: 번호, 종류(stroke/candidate), 이유(small 작은 덩어리, spur 잔가지, "
+                       "overlap 겹침, deleted 지운 획, added 추가), 길이 mm, 테두리 상자 mm, 점 수. "
+                       "region_mm로 좁히면 편합니다. 최대 300줄.",
+        "parameters": {"type": "object", "properties": {
+            "region_mm": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
+            "include_candidates": {"type": "boolean"}}, "additionalProperties": False},
     },
     {
-        "name": "delete_region",
-        "description": "종이 좌표(mm) 사각형 [x0,y0,x1,y1] 안(inside) 또는 밖(outside)에 있는 획을 지웁니다.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "region_mm": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
-                "mode": {"type": "string", "enum": ["inside", "outside"]},
-            },
-            "required": ["region_mm", "mode"],
-            "additionalProperties": False,
-        },
+        "name": "get_stroke",
+        "description": "획 하나의 점 좌표 [점 번호, x_mm, y_mm] (최대 400점). 점 편집 전에 확인하세요.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"],
+                       "additionalProperties": False},
+    },
+    {
+        "name": "propose_edits",
+        "description": (
+            "편집을 제안합니다(바로 적용되지 않음). 화면에 빨강(사라짐)·초록(생김)과 번호로 표시되고, "
+            "바뀌는 부위를 확대한 그림을 돌려줍니다. 하나라도 틀리면 아무것도 바뀌지 않습니다. 최대 200개.\n"
+            "ops 항목: {op:'delete', ids:[...]} | {op:'restore', ids:[후보 번호]} | "
+            "{op:'delete_region', region_mm:[x0,y0,x1,y1], mode:'inside'|'outside'} | "
+            "{op:'move_point', id, index, to_mm:[x,y]} | {op:'delete_points', id, indices:[...]} | "
+            "{op:'insert_point', id, after_index, at_mm:[x,y]} | {op:'smooth', id, strength:1~5} | "
+            "{op:'split', id, index} | {op:'join', a, b} | {op:'add_stroke', points_mm:[[x,y],...]}\n"
+            "apply_now=true는 사용자가 '바로 해'라고 했을 때만 쓰세요."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "ops": {"type": "array", "minItems": 1, "maxItems": 200,
+                    "items": {"type": "object", "properties": {"op": {"type": "string", "enum": [
+                        "delete", "restore", "delete_region", "move_point", "delete_points", "insert_point",
+                        "smooth", "split", "join", "add_stroke"]}}, "required": ["op"]}},
+            "apply_now": {"type": "boolean"}}, "required": ["ops"], "additionalProperties": False},
+    },
+    {
+        "name": "apply_proposals",
+        "description": "제안을 적용합니다. 모두 적용하거나, exclude=[번호]로 빼거나, only=[번호]만. "
+                       "잇기·자르기로 묶인 번호는 함께 골라야 적용됩니다. 적용 후 제안 목록은 비워집니다.",
+        "parameters": {"type": "object", "properties": {
+            "exclude": {"type": "array", "items": {"type": "integer"}},
+            "only": {"type": "array", "items": {"type": "integer"}}}, "additionalProperties": False},
+    },
+    {
+        "name": "discard_proposals",
+        "description": "제안을 취소합니다. ids를 빼면 전부.",
+        "parameters": {"type": "object", "properties": {"ids": {"type": "array", "items": {"type": "integer"}}},
+                       "additionalProperties": False},
     },
     {
         "name": "undo",
-        "description": "마지막 획 편집을 되돌립니다.",
+        "description": "마지막으로 적용한 편집을 되돌립니다.",
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
@@ -176,8 +212,10 @@ class AgentToolbox:
     def _get_state(self):
         return [text_part(self.session.state())]
 
-    def _view(self, kind, numbered=False, region_mm=None):
-        img = self.session.render(kind, region_mm=region_mm, numbered=numbered)
+    def _view(self, kind, numbered=None, region_mm=None, show_candidates=False, overlay_original=0.0):
+        numbered = (kind == "edit") if numbered is None else numbered
+        img = self.session.render(kind, region_mm=region_mm, numbered=numbered,
+                                  show_candidates=show_candidates, overlay=overlay_original)
         label = f"{kind}" + (" (번호)" if numbered else "") + (f" 영역 {region_mm}" if region_mm else "")
         return [text_part(f"그림: {label}"), image_part(img)]
 
@@ -190,17 +228,35 @@ class AgentToolbox:
         self.on_change("result")
         st = s.state()
         return [text_part({"applied": applied, "image_type": st["image_type"], "detail": st["detail"],
-                           "result": st.get("result")})]
+                           "result": st.get("result"), "edit": st.get("edit")})]
 
-    def _delete_strokes(self, ids):
-        n = self.session.delete_strokes(ids)
-        self.on_change("result")
-        return [text_part({"deleted": n, "result": self.session.state().get("result")})]
+    def _list_strokes(self, region_mm=None, include_candidates=False):
+        return [text_part(self.session.list_strokes(region_mm, include_candidates))]
 
-    def _delete_region(self, region_mm, mode):
-        n = self.session.delete_region(region_mm, mode)
+    def _get_stroke(self, id):
+        return [text_part(self.session.get_stroke(id))]
+
+    def _propose_edits(self, ops, apply_now=False):
+        s = self.session
+        out = s.propose_edits(ops, apply_now=apply_now)
+        self.on_change("result" if apply_now else "proposals")
+        if apply_now:
+            return [text_part({**out, "result": s.state().get("result")})]
+        region = s.proposal_region_mm(out["proposed"])
+        parts = [text_part({**out, "legend": "빨강=사라짐, 초록=생김, 숫자=번호"})]
+        if region:
+            parts.append(image_part(s.render("edit", region_mm=region, numbered=True, overlay=0.3)))
+        return parts
+
+    def _apply_proposals(self, exclude=None, only=None):
+        out = self.session.apply_proposals(exclude=exclude, only=only)
         self.on_change("result")
-        return [text_part({"deleted": n, "result": self.session.state().get("result")})]
+        return [text_part({**out, "result": self.session.state().get("result")})]
+
+    def _discard_proposals(self, ids=None):
+        n = self.session.discard_proposals(ids)
+        self.on_change("proposals")
+        return [text_part({"discarded": n})]
 
     def _undo(self):
         desc = self.session.undo()
