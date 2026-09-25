@@ -78,6 +78,32 @@ class TraceStrokesTest(unittest.TestCase):
         self.assertLess(dark_len, 290)
 
 
+class ResizeTest(unittest.TestCase):
+    def test_small_image_is_upscaled_to_max_side(self):
+        # 저해상도 원본도 긴 변 800px로 맞춰야 px 파라미터 의미가 같고 선이 매끄러움
+        small = np.zeros((267, 189), np.uint8)
+        self.assertEqual(sp.resize_max_side(small).shape, (800, 566))
+        self.assertEqual(sp.resize_max_side(small, upscale=False).shape, (267, 189))
+
+    def test_large_image_is_downscaled(self):
+        big = np.zeros((1200, 2000), np.uint8)
+        self.assertEqual(sp.resize_max_side(big).shape, (480, 800))
+
+
+class MedianPrefilterTest(unittest.TestCase):
+    def test_median_removes_screentone_but_keeps_line(self):
+        # 망점(스크린톤) 영역 + 굵은 선 하나
+        img = np.full((200, 300), 255, np.uint8)
+        for y in range(20, 180, 6):          # 지름 5px, 6px 간격 망점
+            for x in range(20, 140, 6):
+                cv2.circle(img, (x, y), 2, 0, -1)
+        cv2.line(img, (170, 30), (280, 170), 0, 5)
+        _, plain = sp.run_pipeline(img, 80, 200, 5, 40, 3.0)
+        _, filt = sp.run_pipeline(img, 80, 200, 5, 40, 3.0, median_ksize=7)
+        self.assertGreater(len(plain), len(filt))
+        self.assertTrue(any(sp.polyline_length(s) > 150 for s in filt))  # 선은 남음
+
+
 class SimplifyAndOrderTest(unittest.TestCase):
     def test_simplify_keeps_closed_loop_closed(self):
         e = blank(200, 200)

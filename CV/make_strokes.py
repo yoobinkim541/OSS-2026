@@ -53,6 +53,8 @@ def main():
                     help="skeleton: 선을 한 번씩만 지나감(기본) / contour: 비교용 기존 방식")
     ap.add_argument("--lines", choices=["canny", "dark"], default="canny",
                     help="canny: 사진 윤곽(기본) / dark: 선화의 어두운 선 중심선")
+    ap.add_argument("--median", type=int, default=0,
+                    help="미디언 블러 크기(px). 만화 스크린톤 제거에 7 정도 (기본 0 = 사용 안 함)")
     ap.add_argument("--rembg", action="store_true", help="배경 제거 사용 (선택, 느림)")
     ap.add_argument("--box", type=float, nargs=2, default=pm.DEFAULT_BOX_MM, metavar=("W", "H"),
                     help="그리기 상자 크기 mm (기본 100 100)")
@@ -70,7 +72,8 @@ def main():
 
     gray = (sp.remove_background(args.image, args.max_side) if args.rembg
             else sp.load_gray(args.image, args.max_side))
-    edges, strokes_px = sp.run_pipeline(gray, low, high, args.blur, min_len, eps, args.method, args.lines)
+    edges, strokes_px = sp.run_pipeline(gray, low, high, args.blur, min_len, eps, args.method, args.lines,
+                                        args.median)
     if not strokes_px:
         print("획이 하나도 없습니다. --detail high 또는 Canny 임계값을 낮춰보세요.")
         return 1
@@ -86,7 +89,7 @@ def main():
         "params": {
             "detail": args.detail, "canny_low": low, "canny_high": high, "blur_ksize": args.blur,
             "min_length_px": min_len, "epsilon_px": eps, "max_side": args.max_side,
-            "method": args.method, "line_source": args.lines, "rembg": args.rembg,
+            "method": args.method, "line_source": args.lines, "median_ksize": args.median, "rembg": args.rembg,
             "draw_feed_mm_per_min": args.draw_feed, "travel_feed_mm_per_min": args.travel_feed,
         },
     }

@@ -87,6 +87,26 @@ class PlannerTest(unittest.TestCase):
         self.assertRegex(line, r"^M20 G90 G01 X[-\d.]+ Y[-\d.]+ Z[-\d.]+ A[-\d.]+ B[-\d.]+ C[-\d.]+ F\d+$")
 
 
+class SafetyOptionTest(unittest.TestCase):
+    def test_air_mode_never_touches_paper(self):
+        planner = de.Planner(CFG, air=True)
+        contact = CFG["paper_center_tcp_mm"]["x"]
+        xs = [float(line.split(" X")[1].split(" ")[0]) for line, _ in planner.plan(SQUARE)]
+        self.assertTrue(all(abs(x - contact) >= CFG["pen"]["up_clearance_mm"] - 1e-6 for x in xs))
+
+    def test_pending_limits_only_with_flag(self):
+        border = [[(-60.0, -60.0), (60.0, -60.0), (60.0, 60.0), (-60.0, 60.0), (-60.0, -60.0)]]
+        self.assertTrue(de.check_limits(border, CFG))                  # 기본 ±50: 거부
+        self.assertFalse(de.check_limits(border, CFG, pending=True))   # 확장 ±60: 허용
+        self.assertTrue(de.check_limits([[(0.0, 0.0), (0.0, 61.0)]], CFG, pending=True))
+
+    def test_border_test_file_matches_pending_limits(self):
+        path = Path(__file__).resolve().parent.parent / "trajectories" / "border-test-60mm.json"
+        _, strokes = de.load_strokes(path)
+        self.assertTrue(de.check_limits(strokes, CFG))
+        self.assertFalse(de.check_limits(strokes, CFG, pending=True))
+
+
 class ExecuteTest(unittest.TestCase):
     def setUp(self):
         self.cfg = copy.deepcopy(CFG)

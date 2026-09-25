@@ -22,6 +22,10 @@ CV/make_strokes.py 또는 GUI가 만든 sketch_strokes JSON(종이 중심 기준
   - 자동 호밍을 하지 않습니다. Idle이 아니면 시작하지 않습니다.
   - 현재 TCP가 설정된 종이 중심에서 max_start_offset_mm 이상 떨어져 있으면 시작하지 않습니다.
   - 종이 범위(limits)를 벗어나는 점이 하나라도 있으면 전송 전에 거부합니다.
+    실물 확인 전의 넓은 범위(limits_pending_verification)는 --pending-limits를
+    붙였을 때만 쓰며, 그 범위를 확인하는 시험 경로용입니다.
+  - --air: 펜을 종이에 대지 않고(펜업 높이) 같은 경로를 따라갑니다. 도달 범위·충돌을
+    먼저 확인할 때 씁니다.
   - 명령마다 ok 응답을 기다립니다. Alarm / limit / error 응답이나 타임아웃이 오면
     즉시 전송을 멈추고, 복구 동작을 자동으로 하지 않습니다 (사용자 확인 대상).
 """
@@ -64,8 +68,13 @@ def load_strokes(path):
 # 계획: 종이 mm -> 로봇 TCP -> G-code
 # ---------------------------------------------------------------------------
 
-def check_limits(strokes, cfg):
-    lim = cfg["limits"]
+def active_limits(cfg, pending=False):
+    """평소에는 limits, --pending-limits일 때만 실물 미확인 범위."""
+    return cfg["limits_pending_verification"] if pending else cfg["limits"]
+
+
+def check_limits(strokes, cfg, pending=False):
+    lim = active_limits(cfg, pending)
     bad = []
     for i, s in enumerate(strokes):
         for x, y in s:
@@ -75,8 +84,9 @@ def check_limits(strokes, cfg):
 
 
 class Planner:
-    def __init__(self, cfg):
+    def __init__(self, cfg, air=False):
         self.cfg = cfg
+        self.air = air  # True면 펜다운 자세도 펜업 높이로 (종이에 닿지 않음)
         c = cfg["paper_center_tcp_mm"]
         self.cx, self.cy, self.cz = c["x"], c["y"], c["z"]
         o = cfg["orientation_deg"]
@@ -99,7 +109,7 @@ class Planner:
     def pose(self, px, py, pen_down):
         ry, rz = self.robot_yz(px, py)
         x = self.contact_x(ry, rz)
-        if not pen_down:
+        if not pen_down or self.air:
             x += self.up_dx
         return x, ry, rz
 
@@ -271,6 +281,9 @@ def main():
     ap.add_argument("--execute", action="store_true", help="실제 로봇으로 전송 (없으면 dry-run)")
     ap.add_argument("--gcode-out", type=Path, help="dry-run G-code 저장 경로 (기본: 입력 옆 .gcode)")
     ap.add_argument("--verbose", action="store_true", help="컨트롤러 응답을 모두 출력")
+    ap.add_argument("--air", action="store_true", help="펜을 대지 않고 펜업 높이로 경로만 따라감")
+    ap.add_argument("--pending-limits", action="store_true",
+                    help="실물 미확인 확장 범위(limits_pending_verification)로 검사 — 범위 확인 시험 전용")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -279,15 +292,21 @@ def main():
         print("그릴 획이 없습니다.")
         return 1
 
-    bad = check_limits(strokes, cfg)
+    if args.pending_limits:
+        pl = cfg["limits_pending_verification"]
+        print(f"주의: 실물 미확인 확장 범위 ±{pl['max_abs_paper_x_mm']:.0f} x ±{pl['max_abs_paper_y_mm']:.0f} mm로 검사합니다 "
+              f"({pl['status']}). 범위 확인 시험에만 쓰세요.")
+    bad = check_limits(strokes, cfg, args.pending_limits)
     if bad:
         i, x, y = bad[0]
         print(f"거부: 종이 허용 범위를 벗어난 점 {len(bad)}개 (예: 획 {i}, x={x:.1f}, y={y:.1f} mm).")
         print("CV 단계에서 --box를 줄이거나 drawing_config.json의 limits를 확인하세요.")
         return 2
 
-    planner = Planner(cfg)
+    planner = Planner(cfg, air=args.air)
     cmds = planner.plan(strokes)
+    if args.air:
+        print(f"공중 모드(--air): 펜을 종이에 대지 않습니다 (접촉면에서 {cfg['pen']['up_clearance_mm']} mm 떨어져 이동).")
     est, down, up = estimate_seconds(strokes, cfg)
     ys = [planner.robot_yz(x, y)[0] for s in strokes for x, y in s]
     zs = [planner.robot_yz(x, y)[1] for s in strokes for x, y in s]
@@ -343,6 +362,8 @@ def main():
         "strokes_json": str(args.strokes_json),
         "stroke_count": len(strokes),
         "command_count": len(cmds),
+        "air_mode": args.air,
+        "pending_limits": args.pending_limits,
         "estimated_min_time_s": round(est, 1),
         "config_snapshot": cfg,
         "source": doc.get("source", {}),

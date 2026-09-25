@@ -35,15 +35,21 @@ _NEIGHBORS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 
 # 1. 입력
 # ---------------------------------------------------------------------------
 
-def resize_max_side(img, max_side=DEFAULT_MAX_SIDE):
-    """긴 변이 max_side보다 크면 비율을 유지해 줄입니다. None/0이면 그대로 둡니다."""
+def resize_max_side(img, max_side=DEFAULT_MAX_SIDE, upscale=True):
+    """긴 변을 max_side로 맞춥니다(비율 유지). None/0이면 그대로 둡니다.
+
+    작은 이미지도 키웁니다(upscale=True). px 단위 파라미터(최소 길이, 단순화 오차)가
+    원본 해상도와 상관없이 같은 의미를 갖게 하고, 저해상도 원본의 계단 모양 선을
+    매끄럽게 하기 위해서입니다 (267px 일러스트: 눈·안경이 뭉개짐 -> 800px로 키우면 보임).
+    """
     if not max_side:
         return img
     h, w = img.shape[:2]
     scale = max_side / max(h, w)
-    if scale >= 1.0:
+    if scale == 1.0 or (scale > 1.0 and not upscale):
         return img
-    return cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
+    return cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=interp)
 
 
 def load_gray(img_path, max_side=DEFAULT_MAX_SIDE):
@@ -300,27 +306,41 @@ def order_strokes(strokes, start=None):
         start = (allp.min(axis=0) + allp.max(axis=0)) / 2.0
     pos = np.asarray(start, dtype=np.float64)
 
+    # 모든 획의 "시작 후보점"을 한 배열에 모아 두고, 매 단계 numpy로 한 번에 거리를 잰다.
+    # (획마다 Python 반복하던 방식은 획 2700개에 80초가 걸렸음)
+    # 후보: 열린 획 = 앞 끝(mode 0) / 뒤 끝(mode 1), 닫힌 획 = 모든 꼭짓점(mode 2, j = 꼭짓점 번호)
+    cand_pts, cand_owner, cand_mode, cand_j = [], [], [], []
+    for i, s in enumerate(remaining):
+        if is_closed(s):
+            body = s[:-1]
+            cand_pts.append(body)
+            cand_owner.append(np.full(len(body), i))
+            cand_mode.append(np.full(len(body), 2))
+            cand_j.append(np.arange(len(body)))
+        else:
+            cand_pts.append(np.stack([s[0], s[-1]]))
+            cand_owner.append(np.array([i, i]))
+            cand_mode.append(np.array([0, 1]))
+            cand_j.append(np.array([0, 0]))
+    cand_pts = np.vstack(cand_pts)
+    cand_owner = np.concatenate(cand_owner)
+    cand_mode = np.concatenate(cand_mode)
+    cand_j = np.concatenate(cand_j)
+    alive = np.ones(len(cand_pts), dtype=bool)
+
     ordered = []
-    while remaining:
-        best = None  # (dist, index, oriented_stroke)
-        for i, s in enumerate(remaining):
-            if is_closed(s):
-                d = np.linalg.norm(s[:-1] - pos, axis=1)
-                j = int(np.argmin(d))
-                cand = (float(d[j]), i, "rot", j)
-            else:
-                d0 = float(np.linalg.norm(s[0] - pos))
-                d1 = float(np.linalg.norm(s[-1] - pos))
-                cand = (d0, i, "fwd", 0) if d0 <= d1 else (d1, i, "rev", 0)
-            if best is None or cand[0] < best[0]:
-                best = cand
-        _, i, mode, j = best
-        s = remaining.pop(i)
-        if mode == "rev":
+    for _ in range(len(remaining)):
+        d = np.einsum("ij,ij->i", cand_pts - pos, cand_pts - pos)
+        d[~alive] = np.inf
+        k = int(np.argmin(d))
+        i, mode, j = int(cand_owner[k]), int(cand_mode[k]), int(cand_j[k])
+        s = remaining[i]
+        if mode == 1:
             s = s[::-1]
-        elif mode == "rot":
+        elif mode == 2:
             s = _rotate_closed(s, j)
         ordered.append(s)
+        alive[cand_owner == i] = False
         pos = s[-1]
     return ordered
 
@@ -354,12 +374,18 @@ def stroke_metrics(strokes, start=None):
 # ---------------------------------------------------------------------------
 
 def run_pipeline(gray_img, canny_low=50, canny_high=150, blur_ksize=5,
-                 min_length_px=15, epsilon_px=2.0, method="skeleton", line_source="canny"):
+                 min_length_px=15, epsilon_px=2.0, method="skeleton", line_source="canny",
+                 median_ksize=0):
     """회색조 이미지 -> (선 후보 이미지, 정렬된 획 리스트).
 
-    line_source: "canny"(사진 윤곽) | "dark"(선화: 어두운 선의 중심선)
-    method:      "skeleton"(한 번씩만 지나감) | "contour"(비교용 기존 방식)
+    line_source:  "canny"(사진 윤곽) | "dark"(선화: 어두운 선의 중심선)
+    method:       "skeleton"(한 번씩만 지나감) | "contour"(비교용 기존 방식)
+    median_ksize: 0이 아니면 먼저 미디언 블러. 만화 스크린톤(망점)처럼 작은 무늬를
+                  지우고 선의 경계는 남긴다 (만화 1장: 2726획 -> 175획, 7px 기준).
     """
+    if median_ksize and median_ksize > 1:
+        k = int(median_ksize)
+        gray_img = cv2.medianBlur(gray_img, k if k % 2 == 1 else k + 1)
     if line_source == "dark":
         edges = compute_dark_mask(gray_img, blur_ksize)
     else:

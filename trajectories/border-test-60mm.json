@@ -1,0 +1,54 @@
+{
+ "schema_version": 1,
+ "kind": "sketch_strokes",
+ "created_local": "2026-09-25T12:51:44+09:00",
+ "units": "mm",
+ "paper": {
+  "size": "A4",
+  "orientation": "landscape"
+ },
+ "coordinate_frame": {
+  "origin": "paper_center",
+  "x_axis": "paper_right_positive (viewed from the front of the paper)",
+  "y_axis": "paper_up_positive",
+  "robot_mapping": "done by robot/draw_executor.py using robot/drawing_config.json"
+ },
+ "placement": {
+  "alignment": "authored directly in paper mm",
+  "drawing_width_mm": 120,
+  "drawing_height_mm": 120
+ },
+ "source": {
+  "purpose": "±60mm(120x120mm) 도달 범위 확인. 1) --air --pending-limits 로 펜 없이 한 바퀴 2) --pending-limits 로 펜 대고 한 바퀴. 위쪽 두 모서리가 B(J5) 한계에 가장 가까움(시뮬레이션 여유 7.0도)."
+ },
+ "metrics": {
+  "stroke_count": 1
+ },
+ "strokes": [
+  {
+   "closed": true,
+   "points_xy_mm": [
+    [
+     -60.0,
+     -60.0
+    ],
+    [
+     60.0,
+     -60.0
+    ],
+    [
+     60.0,
+     60.0
+    ],
+    [
+     -60.0,
+     60.0
+    ],
+    [
+     -60.0,
+     -60.0
+    ]
+   ]
+  }
+ ]
+}
