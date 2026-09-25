@@ -606,23 +606,25 @@ def run_pipeline(gray_img, canny_low=50, canny_high=150, blur_ksize=5,
     merge_join_px: 0이 아니면 끝점이 이 거리 안에서 만나는 획을 이어 붙여 펜 올림을
                    줄인다. 기본 4px은 100mm로 그릴 때 약 0.5mm(펜 굵기 수준).
     """
-    if median_ksize and median_ksize > 1:
-        k = int(median_ksize)
-        gray_img = cv2.medianBlur(gray_img, k if k % 2 == 1 else k + 1)
-    if line_source == "dark":
-        edges = compute_dark_mask(gray_img, blur_ksize)
-    else:
-        edges = compute_edges(gray_img, canny_low, canny_high, blur_ksize)
     if method == "contour":
+        if median_ksize and median_ksize > 1:
+            k = int(median_ksize)
+            gray_img = cv2.medianBlur(gray_img, k if k % 2 == 1 else k + 1)
+        edges = (compute_dark_mask(gray_img, blur_ksize) if line_source == "dark"
+                 else compute_edges(gray_img, canny_low, canny_high, blur_ksize))
         raw = extract_strokes_contour(edges, min_length_px)
-    else:
-        raw = trace_strokes(edges, min_length_px)
-        if dedupe_px:
-            raw = dedupe_strokes(raw, edges.shape, dedupe_px)
-        if merge_join_px:
-            raw = merge_strokes(raw, merge_join_px)
-    strokes = order_strokes(simplify_strokes(raw, epsilon_px))
-    return edges, strokes
+        return edges, order_strokes(simplify_strokes(raw, epsilon_px))
+
+    from .stages import Pipeline, default_params   # stages가 이 모듈을 import하므로 함수 안에서
+
+    params = {**default_params(), "median_ksize": median_ksize or 0, "blur_ksize": blur_ksize,
+              "edge_mode": "dark" if line_source == "dark" else "luma",
+              "canny_low": canny_low, "canny_high": canny_high, "min_length_px": min_length_px,
+              "spur_px": 6, "dedupe_px": dedupe_px or 0, "merge_join_px": merge_join_px or 0,
+              "epsilon_px": epsilon_px}
+    color = cv2.cvtColor(gray_img, cv2.COLOR_GRAY2BGR)
+    out = Pipeline().run({"gray": gray_img, "color": color}, None, params)["simplify"]
+    return out["edges"], order_strokes(out["strokes"])
 
 
 def draw_strokes_image(strokes, shape, thickness=1):
