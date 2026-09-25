@@ -97,6 +97,25 @@ def main():
         data = compute_all()
         GOLDEN.write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
         print(f"저장: {GOLDEN} (합성 {len(data['synthetic'])}, 샘플 {len(data['samples'])})")
+    if args.perf:
+        import time
+
+        from mirobot_sketch import stages
+        for fname in SAMPLE_TYPES:
+            p = ROOT / "input" / fname
+            if not p.exists():
+                continue
+            inp = {"gray": sp.load_gray(p), "color": sp.load_color(p)}
+            pl, prm = stages.Pipeline(), stages.default_params()
+            t0 = time.perf_counter()
+            pl.run(inp, fname, prm)
+            full = time.perf_counter() - t0
+            t0 = time.perf_counter()
+            pl.run(inp, fname, {**prm, "epsilon_px": 2.0})
+            late = time.perf_counter() - t0
+            lab = pl.run(inp, fname, {**prm, "edge_mode": "lab"})["simplify"]["strokes"]
+            luma = stages.Pipeline().run(inp, fname, prm)["simplify"]["strokes"]
+            print(f"{fname}: 전체 {full:.2f}s, 단순화만 {late:.3f}s, 획 수 밝기 {len(luma)} / 색 차이 {len(lab)}")
 
 
 if __name__ == "__main__":
