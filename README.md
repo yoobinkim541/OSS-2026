@@ -22,9 +22,11 @@
 
 ### 설치
 
-**Windows 사용자 (파이썬 없이):** [Releases](https://github.com/yoobinkim541/OSS-2026/releases)에서 `MirobotSketch-vX.Y.Z-windows-x64.zip`을 받아 압축을 풉니다.
-- `MirobotSketch.exe`: GUI
-- `mirobot.exe`: 명령줄 도구 (`mirobot draw …`, `mirobot strokes …`, `mirobot sim …`)
+**Windows 사용자 (파이썬 없이):** [Releases](https://github.com/yoobinkim541/OSS-2026/releases)에서 받습니다.
+- `MirobotSketch-Setup-X.Y.Z.exe` (추천): 설치하면 시작 메뉴와 바탕화면(선택)에 **Mirobot Sketch** 바로가기가 생기고, "앱 및 기능"에서 제거할 수 있습니다. 관리자 권한은 필요 없습니다.
+- `MirobotSketch-vX.Y.Z-windows-x64.zip`: 설치 없이 압축을 풀어 `MirobotSketch.exe`(GUI)나 `mirobot.exe`(명령줄: `mirobot draw …`, `mirobot strokes …`, `mirobot sim …`)를 실행합니다.
+
+코드 서명이 없어서 처음 실행할 때 Windows SmartScreen이 "알 수 없는 게시자" 경고를 띄울 수 있습니다. **추가 정보 → 실행**을 누르면 됩니다.
 
 설정 파일은 처음 실행할 때 `%APPDATA%\MirobotSketch\drawing_config.json`에 만들어지고, 실행 기록은 같은 폴더의 `runs\`에 쌓입니다. 이 파일에서 포트와 보정값을 고칩니다. 배경 제거(rembg)는 용량 문제로 .exe에 넣지 않았습니다.
 
@@ -34,7 +36,12 @@
 pip install -e .
 ```
 
-`mirobot-sketch`(GUI), `mirobot-strokes`, `mirobot-draw`, `mirobot-sim` 명령이 생깁니다. 저장소에서 실행하면 `robot/drawing_config.json`, `LOG/runs/`, `out/`을 그대로 씁니다. 추가 기능은 필요할 때 설치합니다.
+`mirobot-sketch`(GUI), `mirobot-strokes`, `mirobot-draw`, `mirobot-sim` 명령이 생깁니다. 저장소 코드를 바로가기로 실행하려면 아래 스크립트를 한 번 실행합니다. 바탕화면과 시작 메뉴에 바로가기가 생깁니다(콘솔 창 없음, `-Remove`로 삭제).
+
+```bash
+powershell -ExecutionPolicy Bypass -File packaging/create_shortcuts.ps1
+```
+ 저장소에서 실행하면 `robot/drawing_config.json`, `LOG/runs/`, `out/`을 그대로 씁니다. 추가 기능은 필요할 때 설치합니다.
 - 배경 제거: `pip install -e ".[rembg]"` (첫 실행 때 모델 약 170MB를 내려받음)
 - .exe 빌드: `pip install -e ".[build]"` 후 `pyinstaller packaging/mirobot_sketch.spec --noconfirm`
 

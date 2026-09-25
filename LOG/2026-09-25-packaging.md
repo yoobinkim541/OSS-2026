@@ -118,6 +118,32 @@ GitHub API로 적용했습니다(`PUT /repos/yoobinkim541/OSS-2026/branches/main
 | 리뷰 승인 | 요구 안 함 | 혼자 하는 프로젝트라 자기 PR을 승인할 수 없음 |
 | 관리자 예외 | 켬 (`enforce_admins: false`) | 저장소 주인은 지금처럼 main에 직접 push 가능. Dependabot이나 다른 사람의 PR은 CI를 통과해야 병합됨 |
 
+## 7. 바로가기와 설치 프로그램 (사용자 제안: "바로가기로 클릭해서 실행되면 완성도 있지 않을까")
+
+**개발 PC 바로가기** (`packaging/create_shortcuts.ps1`)
+- 바탕화면과 시작 메뉴에 "Mirobot Sketch.lnk"를 만듭니다. 대상은 `pythonw.exe CV\gui_sketch.py`(콘솔 창 없음), 아이콘은 `assets/app_icon.ico`입니다.
+- 저장소 코드를 실행하므로, 코드를 고치면 바로 반영됩니다. `-Remove`로 지울 수 있습니다.
+- **문제:** BOM 없는 UTF-8 스크립트를 Windows PowerShell 5가 한국어 코드페이지로 읽어, 출력과 바로가기 설명의 한글이 깨졌습니다 → UTF-8 BOM으로 저장해 해결했습니다.
+- **검증:** 이 PC에 바로가기를 만들고, 바로가기로 실행해 "Mirobot Sketch" 창이 뜨는 것을 확인했습니다(12.8초). 설명 문구도 정상입니다.
+
+**작업표시줄 묶음**
+- pythonw로 실행하면 작업표시줄에서 파이썬 아이콘으로 묶였습니다. 그래서 GUI 시작 시 `SetCurrentProcessExplicitAppUserModelID("YoobinKim.MirobotSketch")`로 앱 고유 ID를 지정했습니다.
+- 설치 프로그램의 바로가기에도 같은 ID를 넣었습니다.
+
+**설치 프로그램** (`packaging/installer.iss`, Inno Setup 6)
+- 관리자 권한 없이 사용자 폴더에 설치합니다(`PrivilegesRequired=lowest`).
+- 바로가기: 시작 메뉴에 앱·명령 프롬프트·제거, 바탕화면은 선택
+- MIT 라이선스 동의 화면, 한국어/영어 설치 화면, 설치 후 실행 옵션
+- AppId를 고정해, 새 버전을 설치하면 기존 설치를 업그레이드합니다.
+- 이 PC에는 Inno Setup이 없어서 GitHub Windows 러너에서 빌드합니다. 러너에 없으면 choco로 설치합니다.
+
+**Release 워크플로 확장**
+- 태그와 `__version__`이 일치하는지 검사합니다.
+- PyInstaller → 설치 프로그램 빌드 → **러너에서 조용히 설치**(시작 메뉴 바로가기 확인, 설치된 `mirobot.exe sim` 실행) → **조용히 제거**(파일이 사라졌는지 확인)
+- zip과 Setup.exe를 함께 올립니다.
+
+버전은 0.1.1로 올렸습니다.
+
 ## 남은 일
 
 - (선택) ROS 2 Humble 시뮬레이션용 Dockerfile

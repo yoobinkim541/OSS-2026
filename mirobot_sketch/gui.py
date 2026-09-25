@@ -526,7 +526,17 @@ class SketchApp:
         self._ui(lambda: self.status.configure(text=text))
 
 
+APP_ID = "YoobinKim.MirobotSketch"  # 작업표시줄 묶음·고정용 앱 ID (바로가기/설치 프로그램과 같은 값)
+
+
 def main():
+    if sys.platform.startswith("win"):
+        # 파이썬으로 실행해도 작업표시줄에 python 아이콘이 아니라 이 앱 아이콘으로 따로 표시되게 함
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+        except (AttributeError, OSError):
+            pass
     ctk.set_appearance_mode("Light")
     ctk.set_default_color_theme("blue")
     root = ctk.CTk()

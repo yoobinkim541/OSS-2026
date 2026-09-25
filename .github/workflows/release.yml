@@ -1,6 +1,7 @@
-# v* 태그를 push하면 Windows .exe를 빌드해 GitHub Releases에 올림
-#   git tag v0.1.0 && git push origin v0.1.0
-# 수동 실행(workflow_dispatch)은 빌드 결과를 Actions 아티팩트로만 남김
+# v* 태그를 push하면 Windows .exe와 설치 프로그램을 빌드해 GitHub Releases에 올림
+#   (mirobot_sketch/__init__.py의 __version__을 올린 뒤)
+#   git tag -a v0.1.1 -m "..." && git push origin v0.1.1
+# 수동 실행(workflow_dispatch)은 빌드·검증만 하고 결과를 Actions 아티팩트로 남김
 name: Release
 
 on:
@@ -16,8 +17,11 @@ env:
   PYTHONIOENCODING: utf-8
 
 jobs:
-  windows-exe:
+  windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -25,31 +29,66 @@ jobs:
           python-version: "3.13"
       - name: 설치 (rembg 제외)
         run: python -m pip install -e ".[build]"
+      - name: 버전 확인 (태그 = __version__)
+        run: |
+          $ver = python -c "import mirobot_sketch; print(mirobot_sketch.__version__)"
+          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne "v$ver") {
+            Write-Error "태그 ${{ github.ref_name }}와 코드 버전 v$ver가 다릅니다. __init__.py의 __version__을 맞추세요."
+            exit 1
+          }
+          "VERSION=$ver" >> $env:GITHUB_ENV
       - name: 테스트
         run: python -m unittest discover -s tests
       - name: PyInstaller 빌드
         run: pyinstaller packaging/mirobot_sketch.spec --noconfirm
       - name: 빌드된 exe 동작 확인
-        shell: pwsh
         run: |
           $env:APPDATA = "$env:RUNNER_TEMP\appdata"
           dist\MirobotSketch\mirobot.exe draw trajectories\orientation-test-F.json --gcode-out F.gcode
           if ($LASTEXITCODE -ne 0) { exit 1 }
           dist\MirobotSketch\mirobot.exe sim trajectories\orientation-test-F.json
           if ($LASTEXITCODE -ne 0) { exit 1 }
-      - name: 압축
-        shell: pwsh
+
+      - name: 설치 프로그램 빌드 (Inno Setup)
         run: |
-          $name = "MirobotSketch-${{ github.ref_name }}-windows-x64.zip" -replace '/', '-'
-          Compress-Archive -Path dist\MirobotSketch -DestinationPath $name
-          echo "ZIP=$name" >> $env:GITHUB_ENV
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          & $iscc "/DMyAppVersion=$env:VERSION" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          "SETUP=dist\installer\MirobotSketch-Setup-$env:VERSION.exe" >> $env:GITHUB_ENV
+      - name: 설치 → 실행 → 제거 검증
+        run: |
+          $dir = "$env:RUNNER_TEMP\MirobotSketch"
+          Start-Process $env:SETUP -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/DIR=`"$dir`"" -Wait
+          if (-not (Test-Path "$dir\MirobotSketch.exe")) { Write-Error "설치 실패: $dir\MirobotSketch.exe 없음"; exit 1 }
+          $lnk = Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter "Mirobot Sketch.lnk"
+          if (-not $lnk) { Write-Error "시작 메뉴 바로가기 없음"; exit 1 }
+          "시작 메뉴 바로가기: $($lnk.FullName)"
+          $env:APPDATA = "$env:RUNNER_TEMP\appdata2"
+          & "$dir\mirobot.exe" sim trajectories\orientation-test-F.json
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $env:APPDATA = [Environment]::GetFolderPath('ApplicationData')
+          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          Start-Sleep 3
+          if (Test-Path "$dir\MirobotSketch.exe") { Write-Error "제거 실패"; exit 1 }
+          "설치·실행·제거 확인 완료"
+
+      - name: 압축 (설치 없이 쓰는 버전)
+        run: |
+          $zip = "MirobotSketch-v$env:VERSION-windows-x64.zip"
+          Compress-Archive -Path dist\MirobotSketch -DestinationPath $zip
+          "ZIP=$zip" >> $env:GITHUB_ENV
       - uses: actions/upload-artifact@v7
         with:
           name: MirobotSketch-windows-x64
-          path: ${{ env.ZIP }}
+          path: |
+            ${{ env.ZIP }}
+            ${{ env.SETUP }}
       - name: GitHub Release에 올리기
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v3
         with:
-          files: ${{ env.ZIP }}
+          files: |
+            ${{ env.SETUP }}
+            ${{ env.ZIP }}
           generate_release_notes: true
