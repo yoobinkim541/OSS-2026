@@ -105,8 +105,20 @@
   - README에 CI, 릴리스, 라이선스 배지를 달았습니다.
   - `.github/dependabot.yml`: Actions와 pip 의존성을 매주 확인합니다.
 
+## 6. main 브랜치 보호 규칙 (사용자 요청)
+
+GitHub API로 적용했습니다(`PUT /repos/yoobinkim541/OSS-2026/branches/main/protection`).
+
+| 규칙 | 설정 | 이유 |
+|---|---|---|
+| 필수 상태 검사 | CI 4개 조합(`test (windows-latest, 3.11)` 등), GitHub Actions 앱으로 한정 | 테스트를 통과한 변경만 병합 |
+| 최신 main 기준 | 켬 (strict) | 오래된 브랜치로 통과한 결과를 인정하지 않음 |
+| 강제 push / 브랜치 삭제 | 금지 | 기록 보호 |
+| 대화 해결 필수 | 켬 | PR 코멘트가 남아 있으면 병합 불가 |
+| 리뷰 승인 | 요구 안 함 | 혼자 하는 프로젝트라 자기 PR을 승인할 수 없음 |
+| 관리자 예외 | 켬 (`enforce_admins: false`) | 저장소 주인은 지금처럼 main에 직접 push 가능. Dependabot이나 다른 사람의 PR은 CI를 통과해야 병합됨 |
+
 ## 남은 일
 
-- (선택) main 브랜치 보호 규칙: CI 통과를 병합 조건으로 걸기. 저장소 설정 변경이라 사용자가 결정합니다.
 - (선택) ROS 2 Humble 시뮬레이션용 Dockerfile
 - 코드 서명이 없어 SmartScreen이 "알 수 없는 게시자" 경고를 띄울 수 있습니다.
