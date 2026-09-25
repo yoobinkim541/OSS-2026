@@ -150,7 +150,7 @@ TOOLS = [
     {
         "name": "apply_proposals",
         "description": "제안을 적용합니다. 모두 적용하거나, exclude=[번호]로 빼거나, only=[번호]만. "
-                       "잇기·자르기로 묶인 번호는 함께 골라야 적용됩니다. 적용 후 제안 목록은 비워집니다.",
+                       "잇기·자르기로 묶인 번호는 함께 골라야 적용됩니다. 고르지 않은(뺀) 제안은 확인 전 제안으로 남습니다(취소는 discard_proposals).",
         "parameters": {"type": "object", "properties": {
             "exclude": {"type": "array", "items": {"type": "integer"}},
             "only": {"type": "array", "items": {"type": "integer"}}}, "additionalProperties": False},

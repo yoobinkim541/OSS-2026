@@ -25,6 +25,29 @@ class SessionError(Exception):
     """사용자·에이전트에게 그대로 보여 줄 수 있는 오류."""
 
 
+def _as_int(v, what="번호"):
+    """정수만 받음 (에이전트가 "12"·3.7·true를 보내면 거부: 문자열은 글자마다 번호로 읽히는 등 엉뚱한 획을 고침)."""
+    if isinstance(v, bool) or not isinstance(v, (int, np.integer)):
+        raise SessionError(f"{what}는 정수여야 합니다: {v!r}")
+    return int(v)
+
+
+def _as_ints(v, what="번호"):
+    if not isinstance(v, (list, tuple)):
+        raise SessionError(f"{what} 목록이어야 합니다: {v!r}")
+    return [_as_int(x, what) for x in v]
+
+
+def _as_xy(v):
+    if (not isinstance(v, (list, tuple)) or len(v) != 2
+            or not all(isinstance(t, (int, float, np.number)) and not isinstance(t, bool) for t in v)):
+        raise SessionError(f"좌표는 [x, y] 숫자 두 개여야 합니다: {v!r}")
+    x, y = float(v[0]), float(v[1])
+    if not (np.isfinite(x) and np.isfinite(y)):
+        raise SessionError(f"좌표가 유한한 숫자가 아닙니다: {v!r}")
+    return x, y
+
+
 class SketchSession:
     def __init__(self, cfg=None):
         self.cfg = cfg or de.load_config()
@@ -52,6 +75,7 @@ class SketchSession:
         self.unapplied = 0
         self.notice = ""
         self._last_simplify = None
+        self._fit_strokes = []   # 종이 배치(배율·중심)를 정하는 획: 파이프라인 결과 기준으로 고정 (편집해도 mm 좌표가 안 움직이게)
 
     # ------------------------------------------------------------ 설정
     def param_specs(self):
@@ -102,6 +126,19 @@ class SketchSession:
                 self.generation += 1
         return applied
 
+    # ------------------------------------------------------------ 실패하면 되돌리기
+    _STATE = ("result", "table", "next_id", "book", "pending", "proposals", "_groups", "history", "edit_log",
+              "notice", "_last_simplify", "unapplied", "sim", "_fit_strokes")
+
+    def _snapshot(self):
+        snap = {k: getattr(self, k) for k in self._STATE}
+        snap["history"], snap["edit_log"] = list(self.history), list(self.edit_log)
+        return snap
+
+    def _restore(self, snap):
+        for k, v in snap.items():
+            setattr(self, k, v)
+
     # ------------------------------------------------------------ 처리
     def set_image(self, path):
         gray = sp.load_gray(path)
@@ -109,7 +146,7 @@ class SketchSession:
         with self.lock:
             self.image_path = str(path)
             self.color = color            # 화면·에이전트에 보여 줄 컬러 원본
-            self._inputs_cache = {False: {"gray": gray, "color": color}}
+            self._inputs_cache = {(str(path), False): {"gray": gray, "color": color}}
             self.result = self.sim = None
             self.history, self.edit_log = [], []
             self.book = {"removed": [], "added": []}
@@ -118,10 +155,19 @@ class SketchSession:
             self.generation += 1
 
     def _inputs(self, rembg):
-        if rembg not in self._inputs_cache:
-            color = sp.remove_background_bgr(self.image_path, cache_dir=paths.cache_dir())
-            self._inputs_cache[rembg] = {"gray": cv2.cvtColor(color, cv2.COLOR_BGR2GRAY), "color": color}
-        return self._inputs_cache[rembg], (self.image_path, bool(rembg))
+        # 배경 제거는 약 1분: 그사이 다른 이미지를 열어도 결과가 새 이미지 캐시에 섞이지 않게 시작 시점의 경로·캐시를 씀
+        with self.lock:
+            path, cache = self.image_path, self._inputs_cache
+        key = (path, bool(rembg))
+        if key not in cache:
+            color = sp.remove_background_bgr(path, cache_dir=paths.cache_dir())
+            cache[key] = {"gray": cv2.cvtColor(color, cv2.COLOR_BGR2GRAY), "color": color}
+        return cache[key], key
+
+    def needs_rembg(self):
+        """지금 설정으로 계산하면 배경 제거(오래 걸림)를 새로 해야 하는지 (GUI 안내용)."""
+        with self.lock:
+            return bool(self.params.get("rembg")) and (self.image_path, True) not in self._inputs_cache
 
     def dirty_stages(self):
         """지금 설정으로 다시 계산될 단계들 (GUI가 흐리게 표시)."""
@@ -147,19 +193,26 @@ class SketchSession:
             with self.lock:
                 if self.generation != gen:
                     return None
-                same = outs["simplify"] is self._last_simplify and self.result is not None
-                self.result = {"base": inputs["gray"], "color": self.color, "edges": outs["edges"]["edges"],
-                               "stages": outs, "path": self.image_path, "params": p,
-                               "image_type": self.image_type, "detail": self.detail,
-                               "placement": self.result["placement"] if same else None}
-                if not same:   # 파이프라인 결과가 바뀜: 번호를 새로 매기고, 적용 전 제안은 취소
-                    n = len(self.proposals)
-                    self._build_table(outs, inputs["gray"].shape)
-                    self._clear_proposals()
-                    self.history = []
-                    self.notice = "설정이 바뀌어 번호를 새로 매겼습니다" + (f" (제안 {n}건을 취소했습니다)" if n else "")
-                    self._last_simplify = outs["simplify"]
-                self._refresh_drawing()
+                snap = self._snapshot()
+                try:
+                    same = outs["simplify"] is self._last_simplify and self.result is not None
+                    self.result = {"base": inputs["gray"], "color": self.color, "edges": outs["edges"]["edges"],
+                                   "stages": outs, "path": self.image_path, "params": p,
+                                   "image_type": self.image_type, "detail": self.detail,
+                                   "placement": self.result["placement"] if same else None}
+                    if not same:   # 파이프라인 결과가 바뀜: 번호를 새로 매기고, 적용 전 제안은 취소
+                        n = len(self.proposals)
+                        self._build_table(outs, inputs["gray"].shape)
+                        self._clear_proposals()
+                        self.history = []
+                        self.notice = ("설정이 바뀌어 번호를 새로 매겼습니다"
+                                       + (f" (제안 {n}건을 취소했습니다)" if n else ""))
+                        self._last_simplify = outs["simplify"]
+                        self._fit_strokes = [e["poly"] for e in self.table.values() if e["kind"] == "stroke"]
+                    self._refresh_drawing(refit=True)
+                except Exception:
+                    self._restore(snap)   # 반쯤 바뀐 결과를 남기지 않음 (예: 획이 0개)
+                    raise
                 return self.result
 
     def run_current(self, max_tries=5):
@@ -212,20 +265,27 @@ class SketchSession:
         self.table, self.next_id = table, nid
         self.unapplied = hit.count(False)
 
-    def _refresh_drawing(self):
-        """번호표의 획 -> 그리는 순서 -> 종이 mm -> 시간·미리보기."""
+    def _refresh_drawing(self, refit=False):
+        """번호표의 획 -> 그리는 순서 -> 종이 mm -> 시간·미리보기.
+        종이 배치(배율·중심)는 refit일 때만(다시 계산·크기 변경) 파이프라인 결과 기준으로 정함. 편집을 적용할 때
+        다시 맞추면 모든 획의 mm 좌표가 움직여, 에이전트가 들고 있는 좌표가 틀어짐."""
         strokes = [e["poly"] for _, e in sorted(self.table.items()) if e["kind"] == "stroke"]
         if not strokes:
             raise SessionError("획이 없습니다. 상세도를 높이거나 Canny 하한을 낮춰 보세요.")
         ordered = sp.order_strokes(strokes)
-        box = self.params["box_mm"]
-        strokes_mm, placement = pm.pixels_to_paper(ordered, box_mm=(box, box))
-        self.result["placement"] = placement
-        self._set_strokes(list(ordered), list(strokes_mm))
+        if refit or self.result.get("placement") is None:
+            box = self.params["box_mm"]
+            _, self.result["placement"] = pm.pixels_to_paper(self._fit_strokes or strokes, box_mm=(box, box))
+        strokes_mm = [self.px_to_mm(s) for s in ordered]
+        allp = np.vstack(strokes_mm)
+        size = allp.max(axis=0) - allp.min(axis=0)
+        self.result["placement"] = {**self.result["placement"], "drawing_width_mm": round(float(size[0]), 3),
+                                    "drawing_height_mm": round(float(size[1]), 3)}
+        self._set_strokes(list(ordered), strokes_mm)
 
     # ------------------------------------------------------------ 좌표
     def mm_to_px(self, xy):
-        x, y = (float(v) for v in xy)
+        x, y = _as_xy(xy)
         lim = self.cfg["limits_pending_verification"]
         if abs(x) > lim["max_abs_paper_x_mm"] or abs(y) > lim["max_abs_paper_y_mm"]:
             raise SessionError(f"좌표 ({x:.1f}, {y:.1f})mm가 허용 범위 ±{lim['max_abs_paper_x_mm']:.0f}mm 밖입니다")
@@ -254,14 +314,15 @@ class SketchSession:
         name = op.get("op")
 
         def entry(i, kind="stroke"):
-            e = table.get(int(i))
+            i = _as_int(i)
+            e = table.get(i)
             if e is None or e["kind"] != kind:
                 what = "획" if kind == "stroke" else "후보"
                 raise SessionError(f"{i}번은 {what}가 아닙니다")
-            return int(i), e
+            return i, e
 
         if name in ("delete", "delete_region"):
-            ids = (op["ids"] if name == "delete"
+            ids = (_as_ints(op["ids"]) if name == "delete"
                    else self._ids_in_region(table, op["region_mm"], op.get("mode", "inside"),
                                             float(op.get("min_fraction", 0.5))))
             groups = []
@@ -272,7 +333,7 @@ class SketchSession:
             return groups
         if name == "restore":
             groups = []
-            for i in op["ids"]:
+            for i in _as_ints(op["ids"]):
                 i, e = entry(i, "candidate")
                 table[i] = {**e, "kind": "stroke"}
                 groups.append([i])
@@ -281,18 +342,18 @@ class SketchSession:
             i, e = entry(op["id"])
             p = e["poly"]
             if name == "move_point":
-                q = edits.move_point(p, op["index"], self.mm_to_px(op["to_mm"]))
+                q = edits.move_point(p, _as_int(op["index"], "점 번호"), self.mm_to_px(op["to_mm"]))
             elif name == "delete_points":
-                q = edits.delete_points(p, op["indices"])
+                q = edits.delete_points(p, _as_ints(op["indices"], "점 번호"))
             elif name == "insert_point":
-                q = edits.insert_point(p, op["after_index"], self.mm_to_px(op["at_mm"]))
+                q = edits.insert_point(p, _as_int(op["after_index"], "점 번호"), self.mm_to_px(op["at_mm"]))
             else:
-                q = edits.smooth(p, op.get("strength", 2))
+                q = edits.smooth(p, _as_int(op.get("strength", 2), "strength"))
             table[i] = {**e, "poly": q}
             return [[i]]
         if name == "split":
             i, e = entry(op["id"])
-            a, b = edits.split(e["poly"], op["index"])
+            a, b = edits.split(e["poly"], _as_int(op["index"], "점 번호"))
             nid = alloc()
             table[i] = {**e, "poly": a}
             table[nid] = {"kind": "stroke", "poly": b, "reason": "added"}
@@ -306,7 +367,7 @@ class SketchSession:
             return [[a, b]]
         if name == "add_stroke":
             pts = op["points_mm"]
-            if not 2 <= len(pts) <= 200:
+            if not isinstance(pts, (list, tuple)) or not 2 <= len(pts) <= 200:
                 raise SessionError("add_stroke는 점 2~200개")
             nid = alloc()
             table[nid] = {"kind": "stroke", "poly": np.array([self.mm_to_px(xy) for xy in pts]), "reason": "added"}
@@ -364,6 +425,10 @@ class SketchSession:
                     label = op.get("op") if isinstance(op, dict) else op
                     msg = f"필요한 값 {e} 없음" if isinstance(e, KeyError) else str(e)
                     raise SessionError(f"ops[{n}] ({label}): {msg}") from None
+            touched = {i for g in groups for i in g}
+            if apply_now and touched & set(self.proposals):
+                raise SessionError(f"{sorted(touched & set(self.proposals))}번에 확인 전 제안이 있어 바로 적용할 수 "
+                                   "없습니다. 먼저 그 제안을 적용하거나 취소하세요.")
             self.pending, self.next_id = table, counter[0]
             for g in groups:
                 self._add_group(g)
@@ -424,12 +489,16 @@ class SketchSession:
             if not self.proposals:
                 raise SessionError("적용할 제안이 없습니다")
             ids = set(self.proposals)
-            given = {int(i) for i in (only if only is not None else exclude or [])}
+            given = set(_as_ints(only if only is not None else exclude or []))
             if given - ids:
                 raise SessionError(f"제안에 없는 번호: {sorted(given - ids)[:10]}")
             sel = given if only is not None else ids - given
-            apply_ids = set().union(*[g for g in self._groups.values() if g <= sel])
+            groups = [g for g in self._groups.values() if g <= sel]
+            apply_ids = set().union(*groups) if groups else set()
             partial = sorted(sel - apply_ids)
+            if not apply_ids:
+                raise SessionError("적용할 제안이 선택되지 않았습니다" + (
+                    f" ({partial}번은 다른 번호와 묶인 편집(잇기·자르기)이라 함께 골라야 합니다)" if partial else ""))
             table = dict(self.table)
             book = {"removed": list(self.book["removed"]), "added": list(self.book["added"])}
             for i in sorted(apply_ids):
@@ -438,11 +507,23 @@ class SketchSession:
             if not any(e["kind"] == "stroke" for e in table.values()):
                 raise SessionError("모든 획을 지울 수는 없습니다 (드로잉에는 획이 1개 이상 필요)")
             desc = f"편집 {len(apply_ids)}건 적용: {sorted(apply_ids)[:20]}"
-            self.history.append((self.table, self.book, self.next_id, desc))
-            self.table, self.book = table, book
-            self._clear_proposals()
-            self._refresh_drawing()
-            self.edit_log.append(desc)
+            snap = self._snapshot()
+            try:
+                self.history.append((self.table, self.book, self.next_id, desc))
+                rest = ids - apply_ids           # 고르지 않은 제안은 남김 (새 번호표 위의 제안으로)
+                pending = dict(table)
+                for i in rest:
+                    pending[i] = self.pending[i]
+                self.table, self.book = table, book
+                self.pending = pending if rest else None
+                self.proposals = {i: self.proposals[i] for i in rest}
+                self._groups = {k: g for k, g in self._groups.items() if g <= rest}
+                self.result = dict(self.result)   # 원본 결과는 스냅숏에 그대로 두고 사본을 고침
+                self._refresh_drawing()
+                self.edit_log.append(desc)
+            except Exception:
+                self._restore(snap)
+                raise
             note = (f"{partial}번은 다른 번호와 묶인 편집(잇기·자르기)이라 함께 고르지 않아 적용하지 않았습니다"
                     if partial else "")
             return {"applied": sorted(apply_ids), "not_applied": sorted(ids - apply_ids), "note": note}
@@ -455,8 +536,9 @@ class SketchSession:
                 return n
             drop = set()
             for i in ids:
-                if int(i) in self.proposals:
-                    drop |= self._groups.pop(self.proposals[int(i)]["group"], set())
+                i = _as_int(i)
+                if i in self.proposals:
+                    drop |= self._groups.pop(self.proposals[i]["group"], set())
             for i in drop:
                 self.proposals.pop(i, None)
                 self.pending[i] = self.table.get(i, {"kind": "gone", "poly": None, "reason": ""})
@@ -468,9 +550,15 @@ class SketchSession:
         with self.lock:
             if not self.history:
                 return None
+            snap = self._snapshot()
             self.table, self.book, self.next_id, desc = self.history.pop()
             self._clear_proposals()
-            self._refresh_drawing()
+            try:
+                self.result = dict(self.result)
+                self._refresh_drawing()
+            except Exception:
+                self._restore(snap)
+                raise
             if self.edit_log:
                 self.edit_log.pop()
             return desc
@@ -499,7 +587,7 @@ class SketchSession:
     def get_stroke(self, stroke_id, limit=400):
         with self.lock:
             self._need_result()
-            e = self.table.get(int(stroke_id))
+            e = self.table.get(_as_int(stroke_id))
             if e is None or e["kind"] == "gone":
                 raise SessionError(f"없는 번호: {stroke_id}")
             mm = self.px_to_mm(e["poly"])

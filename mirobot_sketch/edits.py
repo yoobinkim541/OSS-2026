@@ -184,11 +184,14 @@ def render_edit_view(shape, table, views, region_px=None, numbered=True, show_ca
             if np.hypot(*np.diff(q, axis=0).T).sum() >= LABEL_MIN_PX:
                 _label(img, str(i), q[len(q) // 2], color)
                 drawn += 1
-    for v in views:   # 제안은 굵게(3px, 색을 정확히 칠하려고 LINE_8), 번호 딱지는 항상
+    labeled = 0
+    for v in views:   # 제안은 굵게(3px, 색을 정확히 칠하려고 LINE_8), 번호 딱지는 보이는 것 최대 LABEL_MAX개
         for key, color in (("before", RED), ("after", GREEN)):
             if v[key] is not None:
                 q = to_px(v[key])
                 cv2.polylines(img, [q.reshape(-1, 1, 2)], False, color, 3, cv2.LINE_8)
         q = to_px(v["after"] if v["after"] is not None else v["before"])
-        _label(img, str(v["id"]), q[len(q) // 2], GREEN if v["after"] is not None else RED)
+        if labeled < LABEL_MAX and visible(q):
+            _label(img, str(v["id"]), q[len(q) // 2], GREEN if v["after"] is not None else RED)
+            labeled += 1
     return img

@@ -77,6 +77,33 @@ class GuiSmokeTest(unittest.TestCase):
         finally:
             app._on_close()
 
+    def test_thousands_of_proposals_draw_fast_with_capped_labels(self):
+        import numpy as np
+        root, app = make_app()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "line.png"
+                cv2.imwrite(str(p), golden.synthetic_images()["line"])
+                app.load_image(p)
+                self.assertTrue(pump(root, app, lambda: app.result is not None and app._workers == 0))
+                s = app.session
+                s.table = {i + 1: {"kind": "stroke", "reason": "",
+                                   "poly": np.array([[10 + (i % 60) * 12, 10 + (i // 60) * 12],
+                                                     [16 + (i % 60) * 12, 14 + (i // 60) * 12]], float)}
+                           for i in range(3000)}
+                s.next_id = 3001
+                s.propose_edits([{"op": "delete", "ids": list(range(1, 200))}] +
+                                [{"op": "delete", "ids": list(range(k, k + 200))} for k in range(200, 3000, 200)])
+                app.refresh_proposals()
+                t0 = time.time()
+                app.select_stage("edit")
+                app.view.canvas.draw()
+                self.assertLess(time.time() - t0, 5.0)
+                self.assertLessEqual(len(app.view.ax.texts), 450)
+                self.assertLessEqual(len(app.view.ax.lines), 4)       # 제안마다 plot 하지 않음
+        finally:
+            app._on_close()
+
 
 if __name__ == "__main__":
     unittest.main()

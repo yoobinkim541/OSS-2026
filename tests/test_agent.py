@@ -174,7 +174,7 @@ class EditSessionTest(SessionTestBase):
         self.assertEqual(out["applied"], [cands[0]])
         self.assertEqual(s.table[cands[0]]["kind"], "stroke")
         self.assertEqual(s.table[first]["kind"], "stroke")
-        self.assertEqual(s.proposals, {})                          # 적용하면 제안 목록은 비워짐
+        self.assertEqual(set(s.proposals), {first})                # 뺀 제안은 확인 전 제안으로 남음
 
     def test_point_edit_in_mm_and_bounds(self):
         s = self.new_session()
@@ -234,9 +234,10 @@ class EditSessionTest(SessionTestBase):
         s = self.new_session()
         a, b = self.strokes(s)[:2]
         s.propose_edits([{"op": "join", "a": a, "b": b}])
-        out = s.apply_proposals(exclude=[b])
-        self.assertEqual(out["applied"], [])
-        self.assertIn("묶", out["note"])
+        with self.assertRaises(SessionError) as cm:           # 묶음의 일부만 고르면 적용할 것이 없음
+            s.apply_proposals(exclude=[b])
+        self.assertIn("묶", str(cm.exception))
+        self.assertEqual(set(s.proposals), {a, b})
 
     def test_render_edit_region_and_overlay(self):
         s = self.new_session()
@@ -250,6 +251,100 @@ class EditSessionTest(SessionTestBase):
         self.assertEqual(len(r["rows"]), 2)
         self.assertTrue(r["truncated"])
         self.assertEqual(set(r["rows"][0]), {"id", "kind", "reason", "length_mm", "bbox_mm", "points"})
+
+
+class ReviewFixesTest(SessionTestBase):
+    """최종 리뷰에서 나온 문제 재현 (원자성, 입력 검사, 좌표 고정, 캐시, 제안 보존)."""
+
+    def strokes(self, s):
+        return sorted(i for i, e in s.table.items() if e["kind"] == "stroke")
+
+    def test_failed_recompute_keeps_previous_result(self):
+        from mirobot_sketch import session as session_mod
+        s = self.new_session()
+        old_result, old_table = s.result, dict(s.table)
+        s.update_params({"canny_low": 70})
+        with mock.patch.object(session_mod.pm, "pixels_to_paper", side_effect=ValueError("변환 실패")):
+            with self.assertRaises(ValueError):
+                s.run_current()
+        self.assertIs(s.result, old_result)
+        self.assertEqual(s.table.keys(), old_table.keys())
+        self.assertIn("estimated_minutes", s.state()["result"])      # 예전 결과로 상태 조회가 됨
+        s.render("paper")
+
+    def test_failed_apply_changes_nothing(self):
+        from mirobot_sketch import session as session_mod
+        s = self.new_session()
+        sid = self.strokes(s)[0]
+        s.propose_edits([{"op": "delete", "ids": [sid]}])
+        with mock.patch.object(session_mod.sp, "order_strokes", side_effect=RuntimeError("순서 실패")):
+            with self.assertRaises(RuntimeError):
+                s.apply_proposals()
+        self.assertEqual(s.table[sid]["kind"], "stroke")
+        self.assertEqual(s.history, [])
+        self.assertIn(sid, s.proposals)                                # 제안도 그대로
+
+    def test_non_finite_and_wrong_type_inputs_are_rejected(self):
+        s = self.new_session()
+        sid = self.strokes(s)[0]
+        for bad in ({"op": "add_stroke", "points_mm": [[float("nan"), 0], [1, 1]]},
+                    {"op": "delete", "ids": "12"},
+                    {"op": "delete", "ids": [3.7]},
+                    {"op": "split", "id": sid, "index": True},
+                    {"op": "move_point", "id": sid, "index": 0, "to_mm": [1]}):
+            with self.assertRaises(SessionError, msg=str(bad)):
+                s.propose_edits([bad], apply_now=True)
+        self.assertEqual(s.history, [])
+
+    def test_mm_coordinates_of_untouched_strokes_do_not_move(self):
+        s = self.new_session()
+        keep = self.strokes(s)[0]
+        before = s.get_stroke(keep)["points_mm"]
+        s.propose_edits([{"op": "add_stroke", "points_mm": [[0, 0], [58, 58]]}], apply_now=True)
+        self.assertEqual(s.get_stroke(keep)["points_mm"], before)
+        added = max(i for i, e in s.table.items() if e["reason"] == "added")
+        self.assertAlmostEqual(s.get_stroke(added)["points_mm"][1][1], 58, delta=0.2)
+
+    def test_rembg_result_of_previous_image_is_not_cached_for_new_image(self):
+        from mirobot_sketch import session as session_mod
+        import tempfile
+        s = self.new_session()
+        with tempfile.TemporaryDirectory() as d:
+            other = Path(d) / "b.png"
+            make_image(other)
+
+            def slow_rembg(path, **kw):
+                s.set_image(other)                   # 배경 제거 도중 사용자가 다른 이미지를 엶
+                return np.zeros((10, 10, 3), np.uint8)
+
+            with mock.patch.object(session_mod.sp, "remove_background_bgr", side_effect=slow_rembg):
+                s._inputs(True)
+            self.assertEqual(s.image_path, str(other))
+            self.assertFalse(any(k[1] for k in s._inputs_cache))   # 새 이미지 캐시엔 rembg 결과 없음
+
+    def test_empty_selection_is_refused_and_unselected_proposals_are_kept(self):
+        s = self.new_session()
+        a, b = self.strokes(s)[:2]
+        s.propose_edits([{"op": "delete", "ids": [a, b]}])
+        with self.assertRaises(SessionError):
+            s.apply_proposals(exclude=[a, b])
+        self.assertEqual(set(s.proposals), {a, b})
+        self.assertEqual(s.history, [])
+        s.apply_proposals(only=[a])
+        self.assertEqual(set(s.proposals), {b})                         # 고르지 않은 제안은 남음
+        self.assertEqual(s.table[a]["kind"], "candidate")
+        self.assertEqual(s.table[b]["kind"], "stroke")
+        s.apply_proposals()
+        self.assertEqual(s.table[b]["kind"], "candidate")
+
+    def test_apply_now_refuses_ids_with_unconfirmed_proposals(self):
+        s = self.new_session()
+        a, b = self.strokes(s)[:2]
+        s.propose_edits([{"op": "smooth", "id": a, "strength": 2}])
+        with self.assertRaises(SessionError):
+            s.propose_edits([{"op": "delete", "ids": [a]}], apply_now=True)
+        s.propose_edits([{"op": "delete", "ids": [b]}], apply_now=True)   # 다른 번호는 바로 적용되고
+        self.assertIn(a, s.proposals)                                     # 기존 제안은 남음
 
 
 class ToolboxTest(SessionTestBase):

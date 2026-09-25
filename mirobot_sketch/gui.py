@@ -61,6 +61,7 @@ TYPE_KEYS = list(presets.IMAGE_TYPES)                          # photo / illustr
 TYPE_LABELS = [presets.IMAGE_TYPES[k]["label"] for k in TYPE_KEYS]
 DETAIL_KEYS = ["low", "medium", "high"]
 DETAIL_LABELS = ["낮음", "보통", "높음"]
+LABEL_MAX = 400            # 편집 단계 번호 딱지 최대 개수 (화면을 덮지 않고 빠르게)
 RECOMPUTE_DELAY_MS = 300   # 값을 바꾸고 이만큼 조용하면 다시 계산 (슬라이더를 끄는 동안 계속 계산하지 않게)
 
 
@@ -376,46 +377,57 @@ class SketchApp:
             self.view.options_frame.pack_forget()
 
     def _draw_edit(self, ax):
+        """편집 단계 벡터 그림. 선은 색마다 LineCollection 하나로(제안이 수천 개여도 빠르게), 번호 딱지는
+        보이는 범위 안에서 제안 먼저 최대 LABEL_MAX개."""
         s = self.session
         ink = "#374151"   # 편집 그림은 흰 바탕(종이)이라 테마와 상관없이 진한 회색
         x0, y0, x1, y1 = self.view.view_rect()
-        box = ax.get_window_extent()
-        px_per_unit = box.width / max(x1 - x0, 1e-6)
+        px_per_unit = ax.get_window_extent().width / max(x1 - x0, 1e-6)
+        views = s.proposal_views() if s.proposals else []
+        proposed = {v["id"] for v in views}
         strokes, cands, labels = [], [], []
         for i, e in sorted(s.table.items()):
             if e["kind"] == "stroke":
                 strokes.append(e["poly"])
-                labels.append((i, e["poly"], ink))
+                if i not in proposed:
+                    labels.append((i, e["poly"], ink))
             elif e["kind"] == "candidate" and self.show_cands.get():
                 cands.append(e["poly"])
-                labels.append((i, e["poly"], "#9ca3af"))
+                if i not in proposed:
+                    labels.append((i, e["poly"], "#9ca3af"))
         ax.add_collection(LineCollection(strokes, colors=ink, linewidths=0.9))
         if cands:
             ax.add_collection(LineCollection(cands, colors="#9ca3af", linewidths=0.8, linestyles="dashed"))
-        views = s.proposal_views() if s.proposals else []
-        for v in views:
-            if v["before"] is not None:
-                ax.plot(v["before"][:, 0], v["before"][:, 1], color="#dc2626", linewidth=2.6)
-            if v["after"] is not None:
-                ax.plot(v["after"][:, 0], v["after"][:, 1], color="#16a34a", linewidth=2.6)
-        if self.show_numbers.get():
-            n = 0
-            for i, poly, color in labels:
-                if n >= 400:
-                    break
-                mid = poly[len(poly) // 2]
-                if not (x0 <= mid[0] <= x1 and y0 <= mid[1] <= y1):
-                    continue
-                if np.hypot(*np.diff(poly, axis=0).T).sum() * px_per_unit < 20:
-                    continue
-                ax.text(mid[0], mid[1], str(i), fontsize=8, color=color, clip_on=True)
-                n += 1
-        for v in views:
-            poly = v["after"] if v["after"] is not None else v["before"]
+        before = [v["before"] for v in views if v["before"] is not None]
+        after = [v["after"] for v in views if v["after"] is not None]
+        if before:
+            ax.add_collection(LineCollection(before, colors="#dc2626", linewidths=2.6))
+        if after:
+            ax.add_collection(LineCollection(after, colors="#16a34a", linewidths=2.6))
+
+        def in_view(poly):
             mid = poly[len(poly) // 2]
-            ax.text(mid[0], mid[1], str(v["id"]), fontsize=9, fontweight="bold", clip_on=True,
-                    color="white", bbox={"boxstyle": "round,pad=0.2", "lw": 0,
-                                         "fc": "#16a34a" if v["after"] is not None else "#dc2626"})
+            return x0 <= mid[0] <= x1 and y0 <= mid[1] <= y1, mid
+
+        n = 0
+        for v in views:   # 제안 딱지 우선
+            if n >= LABEL_MAX:
+                break
+            poly = v["after"] if v["after"] is not None else v["before"]
+            ok, mid = in_view(poly)
+            if ok:
+                ax.text(mid[0], mid[1], str(v["id"]), fontsize=9, fontweight="bold", clip_on=True,
+                        color="white", bbox={"boxstyle": "round,pad=0.2", "lw": 0,
+                                             "fc": "#16a34a" if v["after"] is not None else "#dc2626"})
+                n += 1
+        if self.show_numbers.get():
+            for i, poly, color in labels:
+                if n >= LABEL_MAX:
+                    break
+                ok, mid = in_view(poly)
+                if ok and np.hypot(*np.diff(poly, axis=0).T).sum() * px_per_unit >= 20:
+                    ax.text(mid[0], mid[1], str(i), fontsize=8, color=color, clip_on=True)
+                    n += 1
 
     def refresh_proposals(self):
         views = self.session.proposal_views() if self.session.proposals else []
@@ -502,7 +514,7 @@ class SketchApp:
             self.progress.configure(mode="indeterminate")
             self.progress.start()
         self._workers += 1
-        if self.session.params.get("rembg") and True not in self.session._inputs_cache:
+        if self.session.needs_rembg():
             self._set_status("배경 제거 중 (rembg, 한 번만 오래 걸림)...")
         else:
             self._set_status("계산 중...")
