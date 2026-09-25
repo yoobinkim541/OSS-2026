@@ -192,6 +192,23 @@ class ToolboxTest(SessionTestBase):
             self.assertTrue(err)
             self.assertTrue(parts[0]["text"].startswith("오류"))
 
+    def test_set_params_schema_comes_from_stage_specs(self):
+        props = next(t for t in TOOLS if t["name"] == "set_params")["parameters"]["properties"]
+        self.assertEqual(props["edge_mode"]["enum"], ["luma", "lab", "dark"])
+        self.assertEqual(props["blur_ksize"]["maximum"], 15)
+        for key in stages.PARAM_SPECS:
+            self.assertIn(key, props)
+
+    def test_set_params_lab_and_view_each_stage(self):
+        tb = AgentToolbox(self.new_session())
+        parts, err = tb.call("set_params", {"edge_mode": "lab"})
+        self.assertFalse(err, parts)
+        self.assertEqual(json.loads(parts[0]["text"])["applied"], {"edge_mode": "lab"})
+        for kind in stages.PIPELINE_IDS:
+            parts, err = tb.call("view", {"kind": kind})
+            self.assertFalse(err, kind)
+            self.assertEqual(parts[1]["type"], "image")
+
     def test_set_params_notifies_screen(self):
         changes = []
         tb = AgentToolbox(self.new_session(), on_change=changes.append)
