@@ -282,7 +282,7 @@ def neighbor_count(skel):
     return cv2.filter2D(skel.astype(np.float32), -1, k, borderType=cv2.BORDER_CONSTANT).astype(np.int32)
 
 
-def trace_strokes(edges, min_length_px=15, spur_px=6):
+def trace_strokes(edges, min_length_px=15, spur_px=6, discarded=None):
     """엣지 이미지 -> 한 번씩만 지나가는 획 리스트.
 
     잡음 제거는 두 단계로 합니다.
@@ -290,12 +290,18 @@ def trace_strokes(edges, min_length_px=15, spur_px=6):
          (획 조각 하나하나에 적용하면 글자처럼 분기점이 많은 선이 잘게 끊겨 사라짐)
       2. spur_px: 한쪽 끝이 허공이고 다른 끝이 분기점인 짧은 잔가지(골격화 부작용) 제거.
     분기점 사이의 1~2px짜리 연결 조각도 버립니다 (종이 위에서 0.5mm 미만).
+    discarded가 list면 버린 조각을 (점 배열, 이유)로 추가합니다: "small"(작은 덩어리), "spur"(잔가지).
     """
     skel = skeletonize_edges(edges)
     n, labels, stats, _ = cv2.connectedComponentsWithStats(skel.astype(np.uint8), connectivity=8)
     keep = stats[:, cv2.CC_STAT_AREA] >= min_length_px
     keep[0] = False  # 배경
-    skel = keep[labels]
+    kept = keep[labels]
+    if discarded is not None:
+        for s in trace_skeleton(skel & ~kept):
+            if len(s) >= 2:
+                discarded.append((np.asarray(s), "small"))
+    skel = kept
 
     deg = neighbor_count(skel)
     out = []
@@ -307,6 +313,8 @@ def trace_strokes(edges, min_length_px=15, spur_px=6):
             end_a = deg[s[0][1], s[0][0]] == 1
             end_b = deg[s[-1][1], s[-1][0]] == 1
             if end_a != end_b and length < spur_px:
+                if discarded is not None:
+                    discarded.append((np.asarray(s), "spur"))
                 continue
         out.append(s)
     return out
@@ -322,7 +330,7 @@ def _densify(s):
     return np.round(np.array(out)).astype(np.int32)
 
 
-def dedupe_strokes(strokes, shape, dist_px=4, min_keep_px=8, overlap_px=2):
+def dedupe_strokes(strokes, shape, dist_px=4, min_keep_px=8, overlap_px=2, discarded=None):
     """이미 그린 선과 dist_px 안에서 겹치는 부분을 지웁니다 (이중선 제거).
 
     Canny는 굵은 선의 양쪽 경계를 각각 잡아 한 선을 두 줄로 만듭니다. 펜 굵기
@@ -335,6 +343,7 @@ def dedupe_strokes(strokes, shape, dist_px=4, min_keep_px=8, overlap_px=2):
       overlap_px만큼 겹치게 남겨 끊김을 막음).
     엣지를 부풀려 합치는 방식은 가까운 선들이 세포 모양 그물로 뭉쳐 눈·입이 망가져
     쓰지 않았습니다 (LOG 참고).
+    discarded가 list면 겹쳐서 빠진 구간을 (점 배열, "overlap")으로 추가합니다.
     """
     order = sorted(range(len(strokes)), key=lambda i: -polyline_length(strokes[i]))
     occ = np.zeros(shape[:2], np.uint8)
@@ -366,6 +375,18 @@ def dedupe_strokes(strokes, shape, dist_px=4, min_keep_px=8, overlap_px=2):
             if b - a >= min_keep_px:
                 out.append(pts[a:b])
             k = j
+        if discarded is not None:
+            k = 0
+            while k < n:
+                if free[k]:
+                    k += 1
+                    continue
+                j = k
+                while j < n and not free[j]:
+                    j += 1
+                if j - k >= 2:
+                    discarded.append((pts[k:j], "overlap"))
+                k = j
     return out
 
 

@@ -246,5 +246,30 @@ class LabEdgesTest(unittest.TestCase):
         self.assertLess(abs(int(a) - int(b)), 0.3 * a)
 
 
+class DiscardedTest(unittest.TestCase):
+    def test_trace_records_small_blobs_and_spurs(self):
+        img = np.zeros((200, 200), np.uint8)
+        cv2.circle(img, (100, 100), 50, 255, 1)
+        cv2.line(img, (10, 10), (13, 10), 255, 1)          # 4px 덩어리 -> small
+        cv2.line(img, (150, 100), (154, 100), 255, 1)      # 원에 붙은 5px 잔가지 -> spur
+        disc = []
+        kept = sp.trace_strokes(img, min_length_px=15, spur_px=6, discarded=disc)
+        reasons = {r for _, r in disc}
+        self.assertIn("small", reasons)
+        self.assertIn("spur", reasons)
+        self.assertEqual([np.asarray(s).tolist() for s in sp.trace_strokes(img, 15, 6)],
+                         [np.asarray(s).tolist() for s in kept])            # 기록해도 결과는 같음
+
+    def test_dedupe_records_overlap_pieces(self):
+        a = np.array([[10, 50], [190, 50]])
+        b = np.array([[10, 52], [190, 52]])               # 2px 옆 이중선
+        disc = []
+        out = sp.dedupe_strokes([a, b], (100, 200), 4, discarded=disc)
+        self.assertTrue(disc)
+        self.assertEqual({r for _, r in disc}, {"overlap"})
+        plain = sp.dedupe_strokes([a, b], (100, 200), 4)
+        self.assertEqual([p.tolist() for p in out], [p.tolist() for p in plain])
+
+
 if __name__ == "__main__":
     unittest.main()
