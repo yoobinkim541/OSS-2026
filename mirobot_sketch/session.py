@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from . import draw_executor as de
+from . import edits
 from . import paper_mapping as pm
 from . import paths, presets, stages
 from . import sketch_pipeline as sp
@@ -39,9 +40,18 @@ class SketchSession:
         self.pipeline = stages.Pipeline()
         self._inputs_cache = {}
         self.result = None
-        self.history = []      # 되돌리기용 (strokes_px, strokes_mm, 설명)
+        self.history = []      # 되돌리기용 스냅숏 (번호표, 편집 기록, 다음 번호, 설명)
         self.edit_log = []     # 적용된 편집 설명 (재현·기록용)
         self.sim = None
+        self.table = {}        # 번호 -> {"kind": stroke|candidate|gone, "poly": px 배열, "reason": 이유}
+        self.next_id = 1
+        self.book = {"removed": [], "added": []}   # 모양 기반 편집 기록 (다시 계산해도 유지)
+        self.pending = None    # 제안이 반영된 번호표 사본 (제안이 없으면 None)
+        self.proposals = {}    # 번호 -> {"id", "group"}
+        self._groups, self._group_seq = {}, 0
+        self.unapplied = 0
+        self.notice = ""
+        self._last_simplify = None
 
     # ------------------------------------------------------------ 설정
     def param_specs(self):
@@ -102,6 +112,9 @@ class SketchSession:
             self._inputs_cache = {False: {"gray": gray, "color": color}}
             self.result = self.sim = None
             self.history, self.edit_log = [], []
+            self.book = {"removed": [], "added": []}
+            self._clear_proposals()
+            self._last_simplify = None
             self.generation += 1
 
     def _inputs(self, rembg):
@@ -131,18 +144,22 @@ class SketchSession:
                 outs = self.pipeline.run(inputs, ikey, p, is_current=lambda: self.generation == gen)
             except stages.StaleRun:
                 return None
-            strokes_px = sp.order_strokes(outs["simplify"]["strokes"])
-            if not strokes_px:
-                raise SessionError("획이 없습니다. 상세도를 높이거나 Canny 하한을 낮춰 보세요.")
-            strokes_mm, placement = pm.pixels_to_paper(strokes_px, box_mm=(p["box_mm"], p["box_mm"]))
             with self.lock:
                 if self.generation != gen:
                     return None
+                same = outs["simplify"] is self._last_simplify and self.result is not None
                 self.result = {"base": inputs["gray"], "color": self.color, "edges": outs["edges"]["edges"],
-                               "stages": outs, "placement": placement, "path": self.image_path,
-                               "params": p, "image_type": self.image_type, "detail": self.detail}
-                self.history, self.edit_log, self.sim = [], [], None
-                self._set_strokes(list(strokes_px), list(strokes_mm))
+                               "stages": outs, "path": self.image_path, "params": p,
+                               "image_type": self.image_type, "detail": self.detail,
+                               "placement": self.result["placement"] if same else None}
+                if not same:   # 파이프라인 결과가 바뀜: 번호를 새로 매기고, 적용 전 제안은 취소
+                    n = len(self.proposals)
+                    self._build_table(outs, inputs["gray"].shape)
+                    self._clear_proposals()
+                    self.history = []
+                    self.notice = "설정이 바뀌어 번호를 새로 매겼습니다" + (f" (제안 {n}건을 취소했습니다)" if n else "")
+                    self._last_simplify = outs["simplify"]
+                self._refresh_drawing()
                 return self.result
 
     def run_current(self, max_tries=5):
@@ -171,62 +188,324 @@ class SketchSession:
         if not self.result:
             raise SessionError("먼저 처리를 실행해야 합니다.")
 
-    # ------------------------------------------------------------ 편집
-    def _push(self, desc):
-        r = self.result
-        self.history.append((list(r["strokes_px"]), list(r["strokes_mm"]), desc))
+    # ------------------------------------------------------------ 번호표
+    def _build_table(self, outs, shape):
+        """파이프라인 결과 + 편집 기록 -> 번호표 (획 1..N, 추가한 획, 후보 순)."""
+        base = outs["simplify"]["strokes"]
+        keep, hit = edits.remove_matching(base, [r["poly"] for r in self.book["removed"]], shape)
+        table, nid = {}, 1
 
-    def delete_strokes(self, ids):
-        with self.lock:
-            self._need_result()
-            n = len(self.result["strokes_mm"])
-            ids = sorted({int(i) for i in ids})
-            bad = [i for i in ids if not 0 <= i < n]
-            if bad:
-                raise SessionError(f"없는 획 번호: {bad[:10]} (0~{n - 1})")
-            if not ids:
-                return 0
-            desc = f"획 {len(ids)}개 삭제: {ids[:20]}{' …' if len(ids) > 20 else ''}"
-            self._push(desc)
-            keep = [i for i in range(n) if i not in set(ids)]
-            r = self.result
-            self._set_strokes([r["strokes_px"][i] for i in keep], [r["strokes_mm"][i] for i in keep])
-            self.edit_log.append(desc)
-            return len(ids)
+        def put(kind, poly, reason):
+            nonlocal nid
+            table[nid] = {"kind": kind, "poly": poly, "reason": reason}
+            nid += 1
 
-    def delete_region(self, region_mm, mode="inside", min_fraction=0.5):
-        """종이 좌표(mm) 사각형 [x0, y0, x1, y1] 안(inside) 또는 밖(outside)의 획 삭제.
-        획의 점 중 min_fraction 이상이 해당 쪽에 있으면 지움."""
+        for i in keep:
+            put("stroke", np.asarray(base[i], np.float64), "")
+        for a in self.book["added"]:
+            put("stroke", a, "added")
+        for poly, reason in stages.candidates_of(outs):
+            put("candidate", np.asarray(sp.simplify_strokes([poly], 1.0)[0], np.float64), reason)
+        for r, h in zip(self.book["removed"], hit):
+            if h and r["reason"] == "deleted":
+                put("candidate", r["poly"], "deleted")
+        self.table, self.next_id = table, nid
+        self.unapplied = hit.count(False)
+
+    def _refresh_drawing(self):
+        """번호표의 획 -> 그리는 순서 -> 종이 mm -> 시간·미리보기."""
+        strokes = [e["poly"] for _, e in sorted(self.table.items()) if e["kind"] == "stroke"]
+        if not strokes:
+            raise SessionError("획이 없습니다. 상세도를 높이거나 Canny 하한을 낮춰 보세요.")
+        ordered = sp.order_strokes(strokes)
+        box = self.params["box_mm"]
+        strokes_mm, placement = pm.pixels_to_paper(ordered, box_mm=(box, box))
+        self.result["placement"] = placement
+        self._set_strokes(list(ordered), list(strokes_mm))
+
+    # ------------------------------------------------------------ 좌표
+    def mm_to_px(self, xy):
+        x, y = (float(v) for v in xy)
+        lim = self.cfg["limits_pending_verification"]
+        if abs(x) > lim["max_abs_paper_x_mm"] or abs(y) > lim["max_abs_paper_y_mm"]:
+            raise SessionError(f"좌표 ({x:.1f}, {y:.1f})mm가 허용 범위 ±{lim['max_abs_paper_x_mm']:.0f}mm 밖입니다")
+        pl = self.result["placement"]
+        sc, (cx, cy) = pl["scale_mm_per_px"], pl["center_px"]
+        return (x / sc + cx, -y / sc + cy)
+
+    def px_to_mm(self, pts):
+        pl = self.result["placement"]
+        sc, (cx, cy) = pl["scale_mm_per_px"], pl["center_px"]
+        p = np.asarray(pts, np.float64)
+        return np.column_stack([(p[:, 0] - cx) * sc, -(p[:, 1] - cy) * sc])
+
+    def _region_px(self, region_mm):
+        x0, y0, x1, y1 = [float(v) for v in region_mm]
+        pl = self.result["placement"]
+        sc, (cx, cy) = pl["scale_mm_per_px"], pl["center_px"]
+        xs, ys = sorted((x0 / sc + cx, x1 / sc + cx)), sorted((-y0 / sc + cy, -y1 / sc + cy))
+        return xs[0], ys[0], xs[1], ys[1]
+
+    # ------------------------------------------------------------ 편집 실행 (번호표 사본에)
+    def _exec(self, op, table, alloc):
+        """편집 하나를 table(사본)에 반영. 반환: 묶음 목록 [[번호...], ...]."""
+        if not isinstance(op, dict):
+            raise SessionError("편집은 {\"op\": ...} 객체여야 합니다")
+        name = op.get("op")
+
+        def entry(i, kind="stroke"):
+            e = table.get(int(i))
+            if e is None or e["kind"] != kind:
+                what = "획" if kind == "stroke" else "후보"
+                raise SessionError(f"{i}번은 {what}가 아닙니다")
+            return int(i), e
+
+        if name in ("delete", "delete_region"):
+            ids = (op["ids"] if name == "delete"
+                   else self._ids_in_region(table, op["region_mm"], op.get("mode", "inside"),
+                                            float(op.get("min_fraction", 0.5))))
+            groups = []
+            for i in ids:
+                i, e = entry(i)
+                table[i] = {**e, "kind": "candidate", "reason": "deleted"}
+                groups.append([i])
+            return groups
+        if name == "restore":
+            groups = []
+            for i in op["ids"]:
+                i, e = entry(i, "candidate")
+                table[i] = {**e, "kind": "stroke"}
+                groups.append([i])
+            return groups
+        if name in ("move_point", "delete_points", "insert_point", "smooth"):
+            i, e = entry(op["id"])
+            p = e["poly"]
+            if name == "move_point":
+                q = edits.move_point(p, op["index"], self.mm_to_px(op["to_mm"]))
+            elif name == "delete_points":
+                q = edits.delete_points(p, op["indices"])
+            elif name == "insert_point":
+                q = edits.insert_point(p, op["after_index"], self.mm_to_px(op["at_mm"]))
+            else:
+                q = edits.smooth(p, op.get("strength", 2))
+            table[i] = {**e, "poly": q}
+            return [[i]]
+        if name == "split":
+            i, e = entry(op["id"])
+            a, b = edits.split(e["poly"], op["index"])
+            nid = alloc()
+            table[i] = {**e, "poly": a}
+            table[nid] = {"kind": "stroke", "poly": b, "reason": "added"}
+            return [[i, nid]]
+        if name == "join":
+            (a, ea), (b, eb) = entry(op["a"]), entry(op["b"])
+            if a == b:
+                raise SessionError("서로 다른 두 획을 골라야 합니다")
+            table[a] = {**ea, "poly": edits.join(ea["poly"], eb["poly"])}
+            table[b] = {**eb, "kind": "gone"}
+            return [[a, b]]
+        if name == "add_stroke":
+            pts = op["points_mm"]
+            if not 2 <= len(pts) <= 200:
+                raise SessionError("add_stroke는 점 2~200개")
+            nid = alloc()
+            table[nid] = {"kind": "stroke", "poly": np.array([self.mm_to_px(xy) for xy in pts]), "reason": "added"}
+            return [[nid]]
+        raise SessionError(f"알 수 없는 편집: {name} (delete, restore, delete_region, move_point, delete_points, "
+                           "insert_point, smooth, split, join, add_stroke)")
+
+    def _ids_in_region(self, table, region_mm, mode, min_fraction):
         if mode not in ("inside", "outside"):
             raise SessionError("mode는 inside 또는 outside")
-        x0, y0, x1, y1 = [float(v) for v in region_mm]
-        x0, x1 = sorted((x0, x1))
-        y0, y1 = sorted((y0, y1))
+        x0, y0, x1, y1 = self._region_px(region_mm)
+        ids = []
+        for i, e in table.items():
+            if e["kind"] != "stroke":
+                continue
+            d = edits.densify(e["poly"])
+            inside = ((d[:, 0] >= x0) & (d[:, 0] <= x1) & (d[:, 1] >= y0) & (d[:, 1] <= y1)).mean()
+            if (inside if mode == "inside" else 1 - inside) >= min_fraction:
+                ids.append(i)
+        return ids
+
+    # ------------------------------------------------------------ 제안
+    def _clear_proposals(self):
+        self.pending, self.proposals, self._groups = None, {}, {}
+
+    def _add_group(self, ids):
+        merged = set(ids)
+        for g in {self.proposals[i]["group"] for i in ids if i in self.proposals}:
+            merged |= self._groups.pop(g)
+        self._group_seq += 1
+        self._groups[self._group_seq] = merged
+        for i in merged:
+            self.proposals[i] = {"id": i, "group": self._group_seq}
+
+    def propose_edits(self, ops, apply_now=False):
+        """편집을 제안 목록에 추가. 하나라도 틀리면 아무것도 바뀌지 않음."""
         with self.lock:
             self._need_result()
-            ids = []
-            for i, s in enumerate(self.result["strokes_mm"]):
-                s = np.asarray(s)
-                inside = (s[:, 0] >= x0) & (s[:, 0] <= x1) & (s[:, 1] >= y0) & (s[:, 1] <= y1)
-                frac = inside.mean() if mode == "inside" else 1 - inside.mean()
-                if frac >= min_fraction:
-                    ids.append(i)
-            if not ids:
-                return 0
-            count = self.delete_strokes(ids)
-            self.edit_log[-1] = f"영역 {mode} 삭제 [{x0:.0f},{y0:.0f},{x1:.0f},{y1:.0f}]mm: 획 {count}개"
-            self.history[-1] = self.history[-1][:2] + (self.edit_log[-1],)
-            return count
+            if not isinstance(ops, list) or not ops:
+                raise SessionError("ops가 비어 있습니다")
+            if len(ops) > edits.MAX_OPS:
+                raise SessionError(f"한 번에 편집은 {edits.MAX_OPS}개까지입니다 ({len(ops)}개)")
+            table = dict(self.pending if self.pending is not None else self.table)
+            counter = [self.next_id]
+
+            def alloc():
+                counter[0] += 1
+                return counter[0] - 1
+
+            groups = []
+            for n, op in enumerate(ops):
+                try:
+                    groups += self._exec(op, table, alloc)
+                except (KeyError, TypeError, ValueError, SessionError) as e:
+                    label = op.get("op") if isinstance(op, dict) else op
+                    msg = f"필요한 값 {e} 없음" if isinstance(e, KeyError) else str(e)
+                    raise SessionError(f"ops[{n}] ({label}): {msg}") from None
+            self.pending, self.next_id = table, counter[0]
+            for g in groups:
+                self._add_group(g)
+            created = sorted({i for g in groups for i in g})
+            if apply_now:
+                return self.apply_proposals(only=created)
+            return {"proposed": created, "total": len(self.proposals)}
+
+    def proposal_views(self):
+        """제안마다 사라질 모양(before, 빨강)과 생길 모양(after, 초록)."""
+        out = []
+        for i in sorted(self.proposals):
+            old, new = self.table.get(i), self.pending[i]
+            before = old["poly"] if old is not None and old["kind"] == "stroke" else None
+            after = new["poly"] if new["kind"] == "stroke" else None
+            if before is not None and after is before:
+                continue
+            out.append({"id": i, "before": before, "after": after})
+        return out
+
+    def proposal_region_mm(self, ids=None, margin_mm=5.0):
+        polys = [p for v in self.proposal_views() if ids is None or v["id"] in ids
+                 for p in (v["before"], v["after"]) if p is not None]
+        if not polys:
+            return None
+        mm = self.px_to_mm(np.vstack(polys))
+        (x0, y0), (x1, y1) = mm.min(axis=0) - margin_mm, mm.max(axis=0) + margin_mm
+        return [float(x0), float(y0), float(x1), float(y1)]
+
+    @staticmethod
+    def _find(lst, poly):
+        return next((k for k, x in enumerate(lst) if x is poly), None)
+
+    def _record(self, book, old, new):
+        """번호 하나의 변화(old -> new)를 모양 기록에 반영."""
+        was = old is not None and old["kind"] == "stroke"
+        now = new["kind"] == "stroke"
+        if was and now and new["poly"] is old["poly"]:
+            return
+        if (not was and now and old is not None and old["reason"] == "deleted"
+                and new["poly"] is old["poly"]):
+            k = next((k for k, r in enumerate(book["removed"]) if r["poly"] is old["poly"]), None)
+            if k is not None:
+                book["removed"].pop(k)      # 지웠던 파이프라인 획을 되살림
+                return
+        if was:
+            k = self._find(book["added"], old["poly"])
+            if k is not None:
+                book["added"].pop(k)
+            else:
+                reason = "deleted" if new["kind"] == "candidate" else "replaced"
+                book["removed"].append({"poly": old["poly"], "reason": reason})
+        if now:
+            book["added"].append(new["poly"])
+
+    def apply_proposals(self, exclude=None, only=None):
+        with self.lock:
+            if not self.proposals:
+                raise SessionError("적용할 제안이 없습니다")
+            ids = set(self.proposals)
+            given = {int(i) for i in (only if only is not None else exclude or [])}
+            if given - ids:
+                raise SessionError(f"제안에 없는 번호: {sorted(given - ids)[:10]}")
+            sel = given if only is not None else ids - given
+            apply_ids = set().union(*[g for g in self._groups.values() if g <= sel])
+            partial = sorted(sel - apply_ids)
+            table = dict(self.table)
+            book = {"removed": list(self.book["removed"]), "added": list(self.book["added"])}
+            for i in sorted(apply_ids):
+                self._record(book, self.table.get(i), self.pending[i])
+                table[i] = self.pending[i]
+            if not any(e["kind"] == "stroke" for e in table.values()):
+                raise SessionError("모든 획을 지울 수는 없습니다 (드로잉에는 획이 1개 이상 필요)")
+            desc = f"편집 {len(apply_ids)}건 적용: {sorted(apply_ids)[:20]}"
+            self.history.append((self.table, self.book, self.next_id, desc))
+            self.table, self.book = table, book
+            self._clear_proposals()
+            self._refresh_drawing()
+            self.edit_log.append(desc)
+            note = (f"{partial}번은 다른 번호와 묶인 편집(잇기·자르기)이라 함께 고르지 않아 적용하지 않았습니다"
+                    if partial else "")
+            return {"applied": sorted(apply_ids), "not_applied": sorted(ids - apply_ids), "note": note}
+
+    def discard_proposals(self, ids=None):
+        with self.lock:
+            if ids is None:
+                n = len(self.proposals)
+                self._clear_proposals()
+                return n
+            drop = set()
+            for i in ids:
+                if int(i) in self.proposals:
+                    drop |= self._groups.pop(self.proposals[int(i)]["group"], set())
+            for i in drop:
+                self.proposals.pop(i, None)
+                self.pending[i] = self.table.get(i, {"kind": "gone", "poly": None, "reason": ""})
+            if not self.proposals:
+                self._clear_proposals()
+            return len(drop)
 
     def undo(self):
         with self.lock:
             if not self.history:
                 return None
-            px, mm, desc = self.history.pop()
-            self._set_strokes(px, mm)
+            self.table, self.book, self.next_id, desc = self.history.pop()
+            self._clear_proposals()
+            self._refresh_drawing()
             if self.edit_log:
                 self.edit_log.pop()
             return desc
+
+    # ------------------------------------------------------------ 조회
+    def list_strokes(self, region_mm=None, include_candidates=False, limit=300):
+        with self.lock:
+            self._need_result()
+            box = self._region_px(region_mm) if region_mm else None
+            rows = []
+            for i, e in sorted(self.table.items()):
+                if e["kind"] == "gone" or (e["kind"] == "candidate" and not include_candidates):
+                    continue
+                mm = self.px_to_mm(e["poly"])
+                (x0, y0), (x1, y1) = mm.min(axis=0), mm.max(axis=0)
+                if box:
+                    px0, py0 = e["poly"].min(axis=0)
+                    px1, py1 = e["poly"].max(axis=0)
+                    if px1 < box[0] or px0 > box[2] or py1 < box[1] or py0 > box[3]:
+                        continue
+                rows.append({"id": i, "kind": e["kind"], "reason": e["reason"],
+                             "length_mm": round(float(np.hypot(*np.diff(mm, axis=0).T).sum()), 1),
+                             "bbox_mm": [round(float(v), 1) for v in (x0, y0, x1, y1)], "points": len(mm)})
+            return {"rows": rows[:limit], "truncated": len(rows) > limit, "total": len(rows)}
+
+    def get_stroke(self, stroke_id, limit=400):
+        with self.lock:
+            self._need_result()
+            e = self.table.get(int(stroke_id))
+            if e is None or e["kind"] == "gone":
+                raise SessionError(f"없는 번호: {stroke_id}")
+            mm = self.px_to_mm(e["poly"])
+            pts = [[k, round(float(x), 2), round(float(y), 2)] for k, (x, y) in enumerate(mm[:limit])]
+            return {"id": int(stroke_id), "kind": e["kind"], "reason": e["reason"], "points_mm": pts,
+                    "truncated": len(mm) > limit}
 
     # ------------------------------------------------------------ 시뮬레이션
     def simulate(self):
@@ -261,6 +540,15 @@ class SketchSession:
                     "estimated_minutes": round(t["total_s"] / 60, 1),
                     "out_of_executor_limits": self.result["out_of_limits"] > 0,
                     "edits": list(self.edit_log),
+                }
+                s["edit"] = {
+                    "proposals": [{"id": v["id"], "change": ("delete" if v["after"] is None else
+                                                              "add" if v["before"] is None else "modify")}
+                                  for v in self.proposal_views()] if self.proposals else [],
+                    "strokes": sum(1 for e in self.table.values() if e["kind"] == "stroke"),
+                    "candidates": sum(1 for e in self.table.values() if e["kind"] == "candidate"),
+                    "unapplied_edits": self.unapplied,
+                    "notice": self.notice,
                 }
             s["simulation"] = self.sim["summary"] if self.sim else None
             return s

@@ -21,6 +21,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from mirobot_sketch import sketch_pipeline as sp  # noqa: E402
+from mirobot_sketch import edits  # noqa: E402
 from mirobot_sketch import stages  # noqa: E402
 from mirobot_sketch.agent import backends as bk  # noqa: E402
 from mirobot_sketch.agent.bridge import BridgeClient, BridgeServer  # noqa: E402
@@ -83,26 +84,8 @@ class SessionTest(SessionTestBase):
         self.assertEqual(tuple(int(v) for v in c[20, 5]), (0, 0, 255))
         self.assertEqual(tuple(int(v) for v in c[20, 55]), (255, 255, 255))
 
-    def test_delete_and_undo(self):
-        s = self.new_session()
-        n = s.state()["result"]["strokes"]
-        self.assertEqual(s.delete_strokes([0]), 1)
-        self.assertEqual(s.state()["result"]["strokes"], n - 1)
-        self.assertIsNotNone(s.undo())
-        self.assertEqual(s.state()["result"]["strokes"], n)
-        self.assertIsNone(s.undo())   # 더 되돌릴 것이 없음
-
-    def test_delete_region_outside_keeps_only_region(self):
-        s = self.new_session()
-        s.delete_region([-20, -20, 20, 20], "outside")
-        for stroke in s.result["strokes_mm"]:
-            inside = (np.abs(np.asarray(stroke)) <= 20).all(axis=1).mean()
-            self.assertGreaterEqual(inside, 0.5)
-
     def test_invalid_inputs_raise_session_error(self):
         s = self.new_session()
-        with self.assertRaises(SessionError):
-            s.delete_strokes([10 ** 6])
         with self.assertRaises(SessionError):
             s.update_params({"nope": 1})
         with self.assertRaises(SessionError):
@@ -163,12 +146,102 @@ class SessionTest(SessionTestBase):
         self.assertEqual(applied["box_mm"], 120)       # 실물 미확인 범위(±60mm)가 상한
         self.assertEqual(applied["median_ksize"], 0)
 
-    def test_rerun_clears_edits(self):
+class EditSessionTest(SessionTestBase):
+    def strokes(self, s):
+        return sorted(i for i, e in s.table.items() if e["kind"] == "stroke")
+
+    def test_delete_is_proposed_then_applied_and_undone(self):
         s = self.new_session()
-        s.delete_strokes([0])
-        s.run()
-        self.assertEqual(s.edit_log, [])
-        self.assertEqual(s.history, [])
+        ids = self.strokes(s)
+        r = s.propose_edits([{"op": "delete", "ids": [ids[0]]}])
+        self.assertEqual(r["proposed"], [ids[0]])
+        self.assertEqual(self.strokes(s), ids)                    # 제안만으로는 안 바뀜
+        s.apply_proposals()
+        self.assertEqual(self.strokes(s), ids[1:])
+        self.assertEqual(s.table[ids[0]]["reason"], "deleted")    # 같은 번호의 후보가 됨
+        self.assertIsNotNone(s.undo())
+        self.assertEqual(self.strokes(s), ids)
+
+    def test_restore_candidate_and_exclude(self):
+        s = self.new_session()
+        cands = sorted(i for i, e in s.table.items() if e["kind"] == "candidate")
+        self.assertTrue(cands, "합성 이미지의 잡음 점이 후보로 남아야 함")
+        first = self.strokes(s)[0]
+        s.propose_edits([{"op": "restore", "ids": [cands[0]]}, {"op": "delete", "ids": [first]}])
+        out = s.apply_proposals(exclude=[first])
+        self.assertEqual(out["applied"], [cands[0]])
+        self.assertEqual(s.table[cands[0]]["kind"], "stroke")
+        self.assertEqual(s.table[first]["kind"], "stroke")
+        self.assertEqual(s.proposals, {})                          # 적용하면 제안 목록은 비워짐
+
+    def test_point_edit_in_mm_and_bounds(self):
+        s = self.new_session()
+        sid = self.strokes(s)[0]
+        pts = s.get_stroke(sid)["points_mm"]
+        target = [pts[0][1] * 0.9, pts[0][2] * 0.9]
+        expected_px = s.mm_to_px(target)          # 적용 후엔 테두리 상자가 바뀌어 mm 배치가 달라질 수 있어 px로 비교
+        s.propose_edits([{"op": "move_point", "id": sid, "index": 0, "to_mm": target}], apply_now=True)
+        self.assertTrue(np.allclose(s.table[sid]["poly"][0], expected_px))
+        with self.assertRaises(SessionError):
+            s.propose_edits([{"op": "move_point", "id": sid, "index": 0, "to_mm": [80, 0]}])   # 60mm 밖
+
+    def test_invalid_batch_changes_nothing(self):
+        s = self.new_session()
+        before = {i: e["kind"] for i, e in s.table.items()}
+        sid = self.strokes(s)[0]
+        cand = next(i for i, e in s.table.items() if e["kind"] == "candidate")
+        for bad in ([{"op": "delete", "ids": [sid]}, {"op": "delete", "ids": [10 ** 6]}],
+                    [{"op": "delete", "ids": [cand]}],
+                    [{"op": "delete_points", "id": sid, "indices": [999]}],
+                    [{"op": "teleport"}],
+                    [{"op": "delete", "ids": [sid]}] * (edits.MAX_OPS + 1)):
+            with self.assertRaises(SessionError):
+                s.propose_edits(bad)
+        self.assertEqual({i: e["kind"] for i, e in s.table.items()}, before)
+        self.assertEqual(s.proposals, {})
+
+    def test_cannot_delete_every_stroke(self):
+        s = self.new_session()
+        s.propose_edits([{"op": "delete", "ids": self.strokes(s)}])
+        with self.assertRaises(SessionError):
+            s.apply_proposals()
+
+    def test_edits_survive_recompute_and_pending_proposals_are_cancelled(self):
+        s = self.new_session()
+        ids = self.strokes(s)
+        victim = s.table[ids[0]]["poly"].copy()
+        s.propose_edits([{"op": "delete", "ids": [ids[0]]}], apply_now=True)
+        s.propose_edits([{"op": "delete", "ids": [ids[1]]}])           # 적용 안 한 제안
+        s.update_params({"canny_low": s.params["canny_low"] + 5})
+        s.run_current()
+        self.assertEqual(s.proposals, {})
+        self.assertIn("취소", s.state()["edit"]["notice"])
+        polys = [e["poly"] for e in s.table.values() if e["kind"] == "stroke"]
+        close = [p for p in polys if edits.remove_matching([p], [victim], s.result["base"].shape)[0] == []]
+        self.assertEqual(close, [])                                      # 지운 선은 다시 지워짐
+
+    def test_box_change_keeps_numbers_and_proposals(self):
+        s = self.new_session()
+        sid = self.strokes(s)[0]
+        s.propose_edits([{"op": "delete", "ids": [sid]}])
+        s.update_params({"box_mm": 80})
+        s.run_current()
+        self.assertIn(sid, s.proposals)
+
+    def test_split_join_group_all_or_nothing(self):
+        s = self.new_session()
+        a, b = self.strokes(s)[:2]
+        s.propose_edits([{"op": "join", "a": a, "b": b}])
+        out = s.apply_proposals(exclude=[b])
+        self.assertEqual(out["applied"], [])
+        self.assertIn("묶", out["note"])
+
+    def test_list_strokes_is_truncated(self):
+        s = self.new_session()
+        r = s.list_strokes(include_candidates=True, limit=2)
+        self.assertEqual(len(r["rows"]), 2)
+        self.assertTrue(r["truncated"])
+        self.assertEqual(set(r["rows"][0]), {"id", "kind", "reason", "length_mm", "bbox_mm", "points"})
 
 
 class ToolboxTest(SessionTestBase):
