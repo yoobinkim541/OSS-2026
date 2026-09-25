@@ -8,6 +8,7 @@ SketchSession — 이미지 한 장의 작업 상태 (GUI와 에이전트가 함
 스레드: 무거운 계산은 호출한 스레드에서 돌고, 상태 변경은 lock으로 보호합니다.
 """
 
+import dataclasses
 import threading
 
 import cv2
@@ -15,11 +16,8 @@ import numpy as np
 
 from . import draw_executor as de
 from . import paper_mapping as pm
-from . import paths, presets
+from . import paths, presets, stages
 from . import sketch_pipeline as sp
-
-PARAM_KEYS = ("canny_low", "canny_high", "min_length_px", "epsilon_px", "median_ksize",
-              "dedupe_px", "merge_join_px", "line_source", "rembg", "box_mm")
 
 
 class SessionError(Exception):
@@ -30,21 +28,29 @@ class SketchSession:
     def __init__(self, cfg=None):
         self.cfg = cfg or de.load_config()
         self.lock = threading.RLock()
+        self._run_lock = threading.Lock()   # 파이프라인 계산은 한 번에 하나 (GUI 자동 재계산 + 에이전트)
         self.image_path = None
         self.color = None
         self.image_type = "illustration"
         self.detail = "high"
-        self.params = {}
+        self.generation = 0                 # 설정이 바뀔 때마다 +1 (오래된 계산 결과를 버리는 기준)
+        self.params = stages.default_params()
         self.apply_preset("illustration")
-        self.params.update(line_source="canny", box_mm=100, dedupe_px=presets.DEFAULT_DEDUPE_PX,
-                           merge_join_px=presets.DEFAULT_MERGE_JOIN_PX)
-        self._base_cache = {}
+        self.pipeline = stages.Pipeline()
+        self._inputs_cache = {}
         self.result = None
         self.history = []      # 되돌리기용 (strokes_px, strokes_mm, 설명)
         self.edit_log = []     # 적용된 편집 설명 (재현·기록용)
         self.sim = None
 
     # ------------------------------------------------------------ 설정
+    def param_specs(self):
+        """단계 정의의 조절 항목. box_mm 상한은 설정 파일의 실물 미확인 범위(±60mm -> 120)."""
+        plim = self.cfg["limits_pending_verification"]["max_abs_paper_x_mm"] * 2
+        specs = dict(stages.PARAM_SPECS)
+        specs["box_mm"] = dataclasses.replace(specs["box_mm"], hi=plim)
+        return specs
+
     def apply_preset(self, image_type=None, detail=None):
         """이미지 종류 프리셋(상세도·rembg·미디언)과 상세도 프리셋(Canny·길이·단순화)을 적용."""
         with self.lock:
@@ -61,30 +67,29 @@ class SketchSession:
                 self.detail = detail
             lo, hi, ml, eps = presets.DETAIL_PRESETS[self.detail]
             self.params.update(canny_low=lo, canny_high=hi, min_length_px=ml, epsilon_px=eps)
+            self.generation += 1
 
     def update_params(self, changes):
         """개별 설정 변경. 범위를 벗어나면 잘라서 적용하고 실제 적용값을 돌려줌."""
-        limits = {
-            "canny_low": (0, 255), "canny_high": (0, 400), "min_length_px": (1, 100),
-            "epsilon_px": (0.5, 5.0), "median_ksize": (0, 15), "dedupe_px": (0, 8), "merge_join_px": (0, 8),
-            "box_mm": (30, self.cfg["limits_pending_verification"]["max_abs_paper_x_mm"] * 2),
-        }
+        specs = self.param_specs()
         applied = {}
         with self.lock:
             for k, v in changes.items():
-                if k not in PARAM_KEYS:
+                if k == "line_source":          # 예전 이름: canny -> 밝기(luma), dark -> 어두운 선
+                    if v not in ("canny", "dark"):
+                        raise SessionError("line_source는 canny 또는 dark")
+                    k, v = "edge_mode", ("dark" if v == "dark" else "luma")
+                spec = specs.get(k)
+                if spec is None:
                     raise SessionError(f"알 수 없는 설정: {k}")
-                if k in limits:
-                    lo, hi = limits[k]
-                    v = min(max(float(v), lo), hi)
-                    if k in ("median_ksize", "dedupe_px", "box_mm", "canny_low", "canny_high"):
-                        v = int(round(v))
-                elif k == "line_source" and v not in ("canny", "dark"):
-                    raise SessionError("line_source는 canny 또는 dark")
-                elif k == "rembg":
-                    v = bool(v)
+                try:
+                    v = spec.clamp(v)
+                except (TypeError, ValueError) as e:
+                    raise SessionError(str(e)) from None
                 self.params[k] = v
                 applied[k] = v
+            if applied:
+                self.generation += 1
         return applied
 
     # ------------------------------------------------------------ 처리
@@ -93,37 +98,60 @@ class SketchSession:
         color = sp.load_color(path)
         with self.lock:
             self.image_path = str(path)
-            self.color = color            # 화면·에이전트에 보여 줄 컬러 원본 (처리는 흑백으로)
-            self._base_cache = {(str(path), False): gray}
+            self.color = color            # 화면·에이전트에 보여 줄 컬러 원본
+            self._inputs_cache = {False: {"gray": gray, "color": color}}
             self.result = self.sim = None
             self.history, self.edit_log = [], []
+            self.generation += 1
 
-    def _base_image(self):
-        key = (self.image_path, bool(self.params.get("rembg")))
-        if key not in self._base_cache:
-            self._base_cache[key] = sp.remove_background(self.image_path, cache_dir=paths.cache_dir())
-        return self._base_cache[key]
+    def _inputs(self, rembg):
+        if rembg not in self._inputs_cache:
+            color = sp.remove_background_bgr(self.image_path, cache_dir=paths.cache_dir())
+            self._inputs_cache[rembg] = {"gray": cv2.cvtColor(color, cv2.COLOR_BGR2GRAY), "color": color}
+        return self._inputs_cache[rembg], (self.image_path, bool(rembg))
 
-    def run(self):
-        """현재 설정으로 처리. 이전 편집은 사라짐(획 번호가 바뀌므로)."""
-        if not self.image_path:
-            raise SessionError("먼저 이미지를 열어야 합니다.")
+    def dirty_stages(self):
+        """지금 설정으로 다시 계산될 단계들 (GUI가 흐리게 표시)."""
         with self.lock:
             p = dict(self.params)
-        base = self._base_image()
-        edges, strokes_px = sp.run_pipeline(
-            base, p["canny_low"], p["canny_high"], 5, p["min_length_px"], p["epsilon_px"],
-            "skeleton", p["line_source"], p["median_ksize"],
-            merge_join_px=p["merge_join_px"], dedupe_px=p["dedupe_px"])
-        if not strokes_px:
-            raise SessionError("획이 없습니다. 상세도를 높이거나 Canny 하한을 낮춰 보세요.")
-        strokes_mm, placement = pm.pixels_to_paper(strokes_px, box_mm=(p["box_mm"], p["box_mm"]))
-        with self.lock:
-            self.result = {"base": base, "color": self.color, "edges": edges, "placement": placement, "path": self.image_path,
-                           "params": p, "image_type": self.image_type, "detail": self.detail}
-            self.history, self.edit_log, self.sim = [], [], None
-            self._set_strokes(list(strokes_px), list(strokes_mm))
-            return self.result
+        first = self.pipeline.dirty_from((self.image_path, bool(p["rembg"])), p)
+        ids = [s.id for s in stages.ALL_STAGES]
+        start = ids.index(first) if first else ids.index("edit")
+        return ids[start:]
+
+    def run(self):
+        """현재 설정으로 처리. 더 새로운 설정이 들어와 계산을 버렸으면 None."""
+        if not self.image_path:
+            raise SessionError("먼저 이미지를 열어야 합니다.")
+        with self._run_lock:
+            with self.lock:
+                p, gen = dict(self.params), self.generation
+            inputs, ikey = self._inputs(bool(p["rembg"]))
+            try:
+                outs = self.pipeline.run(inputs, ikey, p, is_current=lambda: self.generation == gen)
+            except stages.StaleRun:
+                return None
+            strokes_px = sp.order_strokes(outs["simplify"]["strokes"])
+            if not strokes_px:
+                raise SessionError("획이 없습니다. 상세도를 높이거나 Canny 하한을 낮춰 보세요.")
+            strokes_mm, placement = pm.pixels_to_paper(strokes_px, box_mm=(p["box_mm"], p["box_mm"]))
+            with self.lock:
+                if self.generation != gen:
+                    return None
+                self.result = {"base": inputs["gray"], "color": self.color, "edges": outs["edges"]["edges"],
+                               "stages": outs, "placement": placement, "path": self.image_path,
+                               "params": p, "image_type": self.image_type, "detail": self.detail}
+                self.history, self.edit_log, self.sim = [], [], None
+                self._set_strokes(list(strokes_px), list(strokes_mm))
+                return self.result
+
+    def run_current(self, max_tries=5):
+        """최신 설정의 결과가 나올 때까지 다시 시도 (에이전트용)."""
+        for _ in range(max_tries):
+            r = self.run()
+            if r is not None:
+                return r
+        raise SessionError("설정이 계속 바뀌고 있어 계산을 마치지 못했습니다. 잠시 후 다시 시도하세요.")
 
     def _set_strokes(self, strokes_px, strokes_mm):
         """획이 바뀔 때마다 시간·미리보기·범위 검사를 다시 계산."""
@@ -222,6 +250,8 @@ class SketchSession:
                  "params": dict(self.params),
                  "executor_limit_mm": self.cfg["limits"]["max_abs_paper_x_mm"] * 2,
                  "pending_limit_mm": self.cfg["limits_pending_verification"]["max_abs_paper_x_mm"] * 2}
+            s["stages"] = [{"id": st.id, "label": st.label, "params": {p.key: self.params[p.key] for p in st.params}}
+                           for st in stages.ALL_STAGES]
             if self.result:
                 t, pl = self.result["timing"], self.result["placement"]
                 s["result"] = {
@@ -236,7 +266,7 @@ class SketchSession:
             return s
 
     def render(self, kind, region_mm=None, numbered=False, max_px=1000):
-        """에이전트·화면용 그림 (BGR). kind: original | lines | paper | strokes"""
+        """에이전트·화면용 그림 (BGR). kind: original | 단계 id | edit | lines | strokes | paper"""
         with self.lock:
             if kind == "original":
                 if not self.image_path:
@@ -244,13 +274,18 @@ class SketchSession:
                 return self.color.copy()
             self._need_result()
             r = self.result
+            if kind in stages.PIPELINE_IDS:
+                return stages.STAGE_BY_ID[kind].preview(r["stages"][kind])
             if kind == "lines":
-                return cv2.cvtColor(255 - r["edges"], cv2.COLOR_GRAY2BGR)
+                return stages.STAGE_BY_ID["edges"].preview(r["stages"]["edges"])
+            if kind == "edit":
+                return stages.draw_strokes_colored(r["strokes_px"], r["base"].shape)
             if kind == "paper":
                 return r["paper"].copy()
             if kind == "strokes":
                 return render_strokes_view(r["strokes_mm"], region_mm, numbered, max_px)
-        raise SessionError(f"알 수 없는 그림 종류: {kind} (original, lines, paper, strokes)")
+        kinds = ", ".join(("original", *stages.PIPELINE_IDS, "edit", "lines", "strokes", "paper"))
+        raise SessionError(f"알 수 없는 그림 종류: {kind} ({kinds})")
 
 
 def render_strokes_view(strokes_mm, region_mm=None, numbered=True, max_px=1000):

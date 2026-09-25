@@ -21,6 +21,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from mirobot_sketch import sketch_pipeline as sp  # noqa: E402
+from mirobot_sketch import stages  # noqa: E402
 from mirobot_sketch.agent import backends as bk  # noqa: E402
 from mirobot_sketch.agent.bridge import BridgeClient, BridgeServer  # noqa: E402
 from mirobot_sketch.agent.tools import TOOLS, AgentToolbox  # noqa: E402
@@ -106,6 +107,55 @@ class SessionTest(SessionTestBase):
             s.update_params({"nope": 1})
         with self.assertRaises(SessionError):
             s.apply_preset("watercolor")
+
+    def test_only_changed_stages_recompute(self):
+        s = self.new_session()
+        before = dict(s.pipeline.run_counts)
+        s.update_params({"epsilon_px": 2.5})
+        s.run()
+        changed = {k for k in before if s.pipeline.run_counts[k] != before[k]}
+        self.assertEqual(changed, {"simplify"})
+
+    def test_line_source_is_mapped_to_edge_mode(self):
+        s = self.new_session()
+        self.assertEqual(s.update_params({"line_source": "dark"}), {"edge_mode": "dark"})
+        self.assertEqual(s.update_params({"line_source": "canny"}), {"edge_mode": "luma"})
+        with self.assertRaises(SessionError):
+            s.update_params({"edge_mode": "rainbow"})
+
+    def test_stale_run_returns_none(self):
+        s = self.new_session()
+        s.update_params({"canny_low": 70})
+        real = s.pipeline.run
+
+        def bump_then_run(*a, **k):
+            s.generation += 1        # 계산 시작 직후 사용자가 값을 또 바꾼 상황
+            return real(*a, **k)
+
+        s.pipeline.run = bump_then_run
+        self.assertIsNone(s.run())
+        s.pipeline.run = real
+        self.assertIsNotNone(s.run_current())
+
+    def test_every_stage_renders_same_size_even_for_tiny_transparent_png(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "tiny.png"
+            img = np.zeros((60, 90, 4), np.uint8)
+            cv2.circle(img, (45, 30), 20, (0, 0, 0, 255), 2)   # 투명 바탕 위 검은 원
+            cv2.imwrite(str(p), img)
+            s = SketchSession()
+            s.set_image(p)
+            s.run_current()
+            h, w = s.result["base"].shape
+            for kind in ("original", *stages.PIPELINE_IDS, "edit", "lines"):
+                self.assertEqual(s.render(kind).shape[:2], (h, w), kind)
+
+    def test_state_lists_stages_with_values(self):
+        st = self.new_session().state()
+        ids = [x["id"] for x in st["stages"]]
+        self.assertEqual(ids, [x.id for x in stages.ALL_STAGES])
+        self.assertIn("edge_mode", st["stages"][2]["params"])
 
     def test_update_params_clamps_to_safe_range(self):
         s = self.new_session()

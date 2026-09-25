@@ -60,6 +60,10 @@ def load_gray(img_path, max_side=DEFAULT_MAX_SIDE):
     img = cv2.imdecode(data, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise ValueError(f"이미지를 읽을 수 없습니다: {img_path}")
+    raw = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
+    if raw is not None and raw.ndim == 3 and raw.shape[2] == 4:
+        # 투명 PNG: 그냥 흑백으로 읽으면 투명 부분이 검게 돼 선이 묻힘 -> 흰 배경에 합성 (load_color와 같게)
+        return cv2.cvtColor(load_color(img_path, max_side), cv2.COLOR_BGR2GRAY)
     return resize_max_side(img, max_side)
 
 
@@ -80,12 +84,13 @@ def load_color(img_path, max_side=DEFAULT_MAX_SIDE):
     return resize_max_side(img, max_side)
 
 
-def remove_background(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
-    """rembg로 배경을 제거하고 흰 배경 위에 합성한 회색조 이미지를 반환합니다.
+def remove_background_bgr(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
+    """rembg로 배경을 제거하고 흰 배경 위에 합성한 컬러(BGR) 이미지를 반환합니다.
     rembg는 선택 기능이라 필요할 때만 import 합니다 (첫 실행 시 모델 다운로드).
 
     cache_dir를 주면 결과를 원본 파일 내용의 해시 이름으로 저장해 두고 재사용합니다
-    (rembg는 이미지 한 장에 약 1분 — GUI를 다시 열 때마다 기다리지 않도록)."""
+    (rembg는 이미지 한 장에 약 1분 — GUI를 다시 열 때마다 기다리지 않도록).
+    색 차이(Lab) 선 검출도 쓸 수 있게 컬러로 저장합니다 (예전 흑백 캐시 rembg_*.png는 쓰지 않음)."""
     import hashlib
     from pathlib import Path
 
@@ -93,9 +98,9 @@ def remove_background(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
         data = f.read()
     cache_file = None
     if cache_dir:
-        cache_file = Path(cache_dir) / f"rembg_{hashlib.sha1(data).hexdigest()[:16]}.png"
+        cache_file = Path(cache_dir) / f"rembg_bgr_{hashlib.sha1(data).hexdigest()[:16]}.png"
         if cache_file.exists():
-            cached = cv2.imdecode(np.fromfile(str(cache_file), np.uint8), cv2.IMREAD_GRAYSCALE)
+            cached = cv2.imdecode(np.fromfile(str(cache_file), np.uint8), cv2.IMREAD_COLOR)
             if cached is not None:
                 return resize_max_side(cached, max_side)
 
@@ -110,11 +115,17 @@ def remove_background(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
 
     fg = Image.open(io.BytesIO(remove(data))).convert("RGBA")
     white_bg = Image.new("RGBA", fg.size, (255, 255, 255, 255))
-    composited = np.array(Image.alpha_composite(white_bg, fg).convert("L"))
+    rgb = np.array(Image.alpha_composite(white_bg, fg).convert("RGB"))
+    composited = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
     if cache_file is not None:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cv2.imencode(".png", composited)[1].tofile(str(cache_file))
     return resize_max_side(composited, max_side)
+
+
+def remove_background(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
+    """remove_background_bgr의 흑백판 (명령줄 make_strokes용)."""
+    return cv2.cvtColor(remove_background_bgr(img_path, max_side, cache_dir), cv2.COLOR_BGR2GRAY)
 
 
 # ---------------------------------------------------------------------------

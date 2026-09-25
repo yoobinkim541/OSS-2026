@@ -378,10 +378,11 @@ class SketchApp:
             s.params.update(
                 canny_low=round(self.canny_low.get()), canny_high=round(self.canny_high.get()),
                 min_length_px=self.min_len.get(), epsilon_px=round(self.epsilon.get(), 1),
-                line_source="dark" if self.line_seg.get().startswith("어두운") else "canny",
+                edge_mode="dark" if self.line_seg.get().startswith("어두운") else "luma",
                 median_ksize=int(round(self.median.get())), dedupe_px=int(round(self.dedupe.get())),
                 merge_join_px=round(self.merge.get()), rembg=bool(self.use_rembg.get()),
                 box_mm=round(self.box_mm.get()))
+            s.generation += 1
 
     def _sync_controls_from_session(self):
         """에이전트가 세션 설정을 바꿨을 때 화면 선택·슬라이더를 맞춤."""
@@ -396,7 +397,7 @@ class SketchApp:
                          (self.merge, "merge_join_px"), (self.box_mm, "box_mm")):
             var.set(p[key])
         self.use_rembg.set(bool(p["rembg"]))
-        self.line_seg.set("어두운 선 중심" if p["line_source"] == "dark" else "윤곽 (Canny)")
+        self.line_seg.set("어두운 선 중심" if p["edge_mode"] == "dark" else "윤곽 (Canny)")
 
     def _refresh_from_session(self, what="result"):
         self._sync_controls_from_session()
@@ -444,11 +445,11 @@ class SketchApp:
     def _process_worker(self):
         try:
             s = self.session
-            if s.params.get("rembg") and (s.image_path, True) not in s._base_cache:
+            if s.params.get("rembg") and True not in s._inputs_cache:
                 self._set_status("배경 제거 중 (rembg, 한 번만 오래 걸림)...")
             else:
                 self._set_status("선 추출 / 획 추적 중...")
-            r = s.run()
+            r = s.run_current()
             self._ui(self._show_result, r)
         except Exception as e:  # GUI에 오류를 보여주기 위함 (SessionError 포함)
             self._ui(messagebox.showerror, "오류", str(e))
