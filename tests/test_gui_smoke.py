@@ -54,6 +54,29 @@ class GuiSmokeTest(unittest.TestCase):
         finally:
             app._on_close()
 
+    def test_edit_stage_shows_proposals_and_applies(self):
+        root, app = make_app()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "line.png"
+                cv2.imwrite(str(p), golden.synthetic_images()["line"])
+                app.load_image(p)
+                self.assertTrue(pump(root, app, lambda: app.result is not None and app._workers == 0))
+                s = app.session
+                sid = next(i for i, e in s.table.items() if e["kind"] == "stroke")
+                s.propose_edits([{"op": "delete", "ids": [sid]}])
+                app.refresh_proposals()
+                app.select_stage("edit")
+                root.update()
+                self.assertTrue(app.proposal_bar.winfo_manager())          # 제안이 있으면 바가 배치됨
+                self.assertIn(sid, app.proposal_bar.chips)
+                app.proposal_bar.apply_btn.invoke()
+                root.update()
+                self.assertEqual(s.table[sid]["kind"], "candidate")
+                self.assertFalse(app.proposal_bar.winfo_manager())         # 적용하면 사라짐
+        finally:
+            app._on_close()
+
 
 if __name__ == "__main__":
     unittest.main()

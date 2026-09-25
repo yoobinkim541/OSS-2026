@@ -14,6 +14,7 @@ Mirobot Sketch — 사진 -> 스케치 -> 로봇용 획(stroke) 데이터 GUI
 명령줄 버전: make_strokes.py
 """
 
+import gc
 import json
 import queue
 import sys
@@ -23,7 +24,9 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import matplotlib
+import numpy as np
 from matplotlib import font_manager
+from matplotlib.collections import LineCollection
 
 try:
     import customtkinter as ctk
@@ -36,7 +39,7 @@ from . import paper_mapping as pm
 from . import paths, presets, stages
 from . import sketch_pipeline as sp
 from .session import SketchSession
-from .stage_view import BigView, ParamControls, StageStrip
+from .stage_view import BigView, ParamControls, ProposalBar, StageStrip
 
 # 한글이 네모로 깨지지 않도록 설치된 한글 글꼴 사용 (Windows: 맑은 고딕)
 FONT = "Malgun Gothic"
@@ -258,6 +261,13 @@ class SketchApp:
         self.view_card.grid(row=1, column=0, sticky="nsew")
         self.view = BigView(self.view_card, font, self._theme_colors)
         self.view.pack(fill="both", expand=True)
+        self.show_numbers = tk.BooleanVar(value=True)
+        self.show_cands = tk.BooleanVar(value=False)
+        for text, var in (("번호", self.show_numbers), ("버린 선", self.show_cands)):
+            ctk.CTkCheckBox(self.view.options_frame, text=text, variable=var, font=font(11), width=20,
+                            command=self.view.redraw).pack(side="left", padx=4)
+        self.view.on_view_change = self.view.redraw     # 확대·이동하면 보이는 획만 번호를 다시 붙임
+        self.proposal_bar = ProposalBar(self.view_card, font, self._apply_proposals, self._discard_proposals)
 
         stats = ctk.CTkFrame(right, fg_color="transparent")
         stats.grid(row=2, column=0, sticky="ew", pady=(10, 0))
@@ -291,6 +301,10 @@ class SketchApp:
     def _build_controls(self):
         if self.controls is not None:
             self.controls.destroy()
+            self.controls = None
+            # 버린 조절 칸의 tk 변수(순환 참조)를 메인 스레드에서 바로 정리. 두면 작업 스레드의 가비지 컬렉션이
+            # 정리하다 "main thread is not in main loop" 경고를 냄
+            gc.collect()
         st = stages.STAGE_BY_ID[self.stage_id]
         specs = [self.session.param_specs()[p.key] for p in st.params]
         self.ctrl_title.configure(text=f"조절: {st.label}" + ("" if specs else " (조절 항목 없음)"))
@@ -350,7 +364,80 @@ class SketchApp:
                 self.view.show(f"{st.label} (계산 전)", s.color)
             return
         overlay = None if self.stage_id in ("source", "paper") else s.color
-        self.view.show(st.label, s.render(self.stage_id), overlay)
+        if self.stage_id == "edit":
+            blank = np.full((*s.result["base"].shape, 3), 255, np.uint8)
+            self.view.show("편집 (빨강=사라짐 · 초록=생김)", blank, overlay, draw_extra=self._draw_edit)
+        else:
+            self.view.show(st.label, s.render(self.stage_id), overlay)
+        # 번호·버린 선 체크박스는 편집 단계에서만 보임
+        if self.stage_id == "edit":
+            self.view.options_frame.pack(side="right", padx=8)
+        else:
+            self.view.options_frame.pack_forget()
+
+    def _draw_edit(self, ax):
+        s = self.session
+        ink = "#374151"   # 편집 그림은 흰 바탕(종이)이라 테마와 상관없이 진한 회색
+        x0, y0, x1, y1 = self.view.view_rect()
+        box = ax.get_window_extent()
+        px_per_unit = box.width / max(x1 - x0, 1e-6)
+        strokes, cands, labels = [], [], []
+        for i, e in sorted(s.table.items()):
+            if e["kind"] == "stroke":
+                strokes.append(e["poly"])
+                labels.append((i, e["poly"], ink))
+            elif e["kind"] == "candidate" and self.show_cands.get():
+                cands.append(e["poly"])
+                labels.append((i, e["poly"], "#9ca3af"))
+        ax.add_collection(LineCollection(strokes, colors=ink, linewidths=0.9))
+        if cands:
+            ax.add_collection(LineCollection(cands, colors="#9ca3af", linewidths=0.8, linestyles="dashed"))
+        views = s.proposal_views() if s.proposals else []
+        for v in views:
+            if v["before"] is not None:
+                ax.plot(v["before"][:, 0], v["before"][:, 1], color="#dc2626", linewidth=2.6)
+            if v["after"] is not None:
+                ax.plot(v["after"][:, 0], v["after"][:, 1], color="#16a34a", linewidth=2.6)
+        if self.show_numbers.get():
+            n = 0
+            for i, poly, color in labels:
+                if n >= 400:
+                    break
+                mid = poly[len(poly) // 2]
+                if not (x0 <= mid[0] <= x1 and y0 <= mid[1] <= y1):
+                    continue
+                if np.hypot(*np.diff(poly, axis=0).T).sum() * px_per_unit < 20:
+                    continue
+                ax.text(mid[0], mid[1], str(i), fontsize=8, color=color, clip_on=True)
+                n += 1
+        for v in views:
+            poly = v["after"] if v["after"] is not None else v["before"]
+            mid = poly[len(poly) // 2]
+            ax.text(mid[0], mid[1], str(v["id"]), fontsize=9, fontweight="bold", clip_on=True,
+                    color="white", bbox={"boxstyle": "round,pad=0.2", "lw": 0,
+                                         "fc": "#16a34a" if v["after"] is not None else "#dc2626"})
+
+    def refresh_proposals(self):
+        views = self.session.proposal_views() if self.session.proposals else []
+        if views:
+            self.proposal_bar.set_views(views)
+            self.proposal_bar.pack(fill="x", padx=8, pady=(0, 8))
+        else:
+            self.proposal_bar.pack_forget()
+        if self.stage_id == "edit":
+            self.view.redraw()
+
+    def _apply_proposals(self, exclude):
+        try:
+            out = self.session.apply_proposals(exclude=exclude)
+        except Exception as e:  # SessionError 포함 (예: 모든 획 삭제)
+            messagebox.showerror("적용 실패", str(e))
+            return
+        self._show_result(self.session.result, status=f"편집 {len(out['applied'])}건 적용. {out['note']}".strip())
+
+    def _discard_proposals(self):
+        self.session.discard_proposals()
+        self.refresh_proposals()
 
     def _sync_controls_from_session(self):
         """에이전트·프리셋이 세션 설정을 바꿨을 때 화면 선택·조절 칸을 맞춤."""
@@ -362,6 +449,9 @@ class SketchApp:
             self.controls.set_values(s.params)
 
     def _refresh_from_session(self, what="result"):
+        if what == "proposals":
+            self.refresh_proposals()
+            return
         self._sync_controls_from_session()
         if self.session.result is not None:
             self._show_result(self.session.result, status="에이전트가 결과를 바꿨습니다.")
@@ -452,7 +542,9 @@ class SketchApp:
                          f"펜 올림/내림 {t['pen_lift_s'] / 60:.1f} · 지연 {t['latency_s'] / 60:.1f}(가정)")
         self.st_sim.set("—", "시뮬레이션 버튼으로 검사")
         edits = len(self.session.edit_log)
-        self._set_status(status + (f" (획 편집 {edits}건)" if edits else ""))
+        notice, self.session.notice = self.session.notice, ""
+        self._set_status(status + (f" (획 편집 {edits}건)" if edits else "") + (f"\n{notice}" if notice else ""))
+        self.refresh_proposals()
 
     def simulate(self):
         if not self.result:

@@ -254,3 +254,61 @@ class ParamControls(ctk.CTkFrame):
     def set_enabled(self, enabled):
         for w in self.widgets:
             w.configure(state="normal" if enabled else "disabled")
+
+
+GREEN_TXT, RED_TXT = "#16a34a", "#dc2626"
+MAX_CHIPS = 40
+
+
+class ProposalBar(ctk.CTkFrame):
+    """제안 n건 · 초록 a · 빨강 b [적용] [취소] + 번호 딱지(눌러서 빼기/넣기)."""
+
+    def __init__(self, master, font, on_apply, on_discard):
+        super().__init__(master, fg_color=("#f3f6fb", "#1b2029"), corner_radius=12)
+        self.font, self.excluded, self.chips = font, set(), {}
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.pack(fill="x", padx=10, pady=(8, 2))
+        self.summary = ctk.CTkLabel(top, text="", font=font(13, "bold"))
+        self.summary.pack(side="left")
+        self.discard_btn = ctk.CTkButton(top, text="취소", width=60, height=28, font=font(12),
+                                         fg_color="transparent", border_width=1, text_color=TEXT,
+                                         command=on_discard)
+        self.discard_btn.pack(side="right", padx=(6, 0))
+        self.apply_btn = ctk.CTkButton(top, text="적용", width=80, height=28, font=font(12, "bold"),
+                                       fg_color=ACCENT, command=lambda: on_apply(sorted(self.excluded)))
+        self.apply_btn.pack(side="right")
+        self.chip_row = ctk.CTkScrollableFrame(self, orientation="horizontal", height=34, fg_color="transparent")
+        self.chip_row.pack(fill="x", padx=6, pady=(0, 6))
+
+    def set_views(self, views):
+        for w in self.chip_row.winfo_children():
+            w.destroy()
+        self.chips = {}
+        ids = {v["id"] for v in views}
+        self.excluded &= ids
+        adds = sum(1 for v in views if v["after"] is not None)
+        dels = sum(1 for v in views if v["after"] is None)
+        # Tk 글꼴은 컬러 이모지를 못 그려(빗금 원) 색 이름으로 표시
+        self.summary.configure(text=f"제안 {len(views)}건 · 초록(생김) {adds} · 빨강(사라짐) {dels}   딱지를 눌러 빼기")
+        for v in views[:MAX_CHIPS]:
+            color = GREEN_TXT if v["after"] is not None else RED_TXT
+            b = ctk.CTkButton(self.chip_row, text=f"#{v['id']}", width=52, height=26, font=self.font(12, "bold"),
+                              fg_color="transparent", border_width=2, border_color=color, text_color=color,
+                              command=lambda i=v["id"]: self._toggle(i))
+            b.pack(side="left", padx=2)
+            self.chips[v["id"]] = b
+        if len(views) > MAX_CHIPS:
+            ctk.CTkLabel(self.chip_row, text=f"… 외 {len(views) - MAX_CHIPS}건", font=self.font(11),
+                         text_color=MUTED).pack(side="left", padx=4)
+        for i in self.excluded:
+            self._style(i)
+
+    def _toggle(self, i):
+        self.excluded ^= {i}
+        self._style(i)
+
+    def _style(self, i):
+        b = self.chips.get(i)
+        if b is not None:
+            b.configure(fg_color=("#e5e7eb", "#374151") if i in self.excluded else "transparent",
+                        text=f"#{i}" + (" 뺌" if i in self.excluded else ""))
