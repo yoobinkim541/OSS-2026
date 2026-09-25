@@ -57,5 +57,23 @@ class RemoveMatchingTest(unittest.TestCase):
         self.assertEqual(edits.remove_matching([LINE], [], (10, 40)), ([0], []))
 
 
+class RenderTest(unittest.TestCase):
+    def test_proposals_are_green_and_red(self):
+        table = {1: {"kind": "stroke", "poly": np.array([[10, 50], [190, 50]], float), "reason": ""},
+                 2: {"kind": "candidate", "poly": np.array([[10, 150], [190, 150]], float), "reason": "small"}}
+        views = [{"id": 1, "before": table[1]["poly"], "after": None},
+                 {"id": 2, "before": None, "after": table[2]["poly"]}]
+        img = edits.render_edit_view((200, 200), table, views, max_px=200)
+        self.assertEqual(tuple(int(v) for v in img[50, 100]), edits.RED)
+        self.assertEqual(tuple(int(v) for v in img[150, 100]), edits.GREEN)
+
+    def test_candidates_hidden_unless_asked(self):
+        table = {1: {"kind": "candidate", "poly": np.array([[10, 100], [190, 100]], float), "reason": "small"}}
+        hidden = edits.render_edit_view((200, 200), table, [], max_px=200)
+        shown = edits.render_edit_view((200, 200), table, [], show_candidates=True, max_px=200)
+        self.assertTrue((hidden == 255).all())
+        self.assertFalse((shown == 255).all())
+
+
 if __name__ == "__main__":
     unittest.main()

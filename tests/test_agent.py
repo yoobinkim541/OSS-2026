@@ -131,8 +131,10 @@ class SessionTest(SessionTestBase):
             s.set_image(p)
             s.run_current()
             h, w = s.result["base"].shape
-            for kind in ("original", *stages.PIPELINE_IDS, "edit", "lines"):
+            for kind in ("original", *stages.PIPELINE_IDS, "lines"):
                 self.assertEqual(s.render(kind).shape[:2], (h, w), kind)
+            eh, ew = s.render("edit").shape[:2]      # 편집 그림은 에이전트용으로 확대(최대 1000px), 비율은 같음
+            self.assertAlmostEqual(eh / ew, h / w, delta=0.01)
 
     def test_state_lists_stages_with_values(self):
         st = self.new_session().state()
@@ -235,6 +237,12 @@ class EditSessionTest(SessionTestBase):
         out = s.apply_proposals(exclude=[b])
         self.assertEqual(out["applied"], [])
         self.assertIn("묶", out["note"])
+
+    def test_render_edit_region_and_overlay(self):
+        s = self.new_session()
+        img = s.render("edit", region_mm=[-10, -10, 10, 10], numbered=True, show_candidates=True, overlay=0.5)
+        self.assertEqual(img.ndim, 3)
+        self.assertLessEqual(max(img.shape[:2]), 1000)
 
     def test_list_strokes_is_truncated(self):
         s = self.new_session()

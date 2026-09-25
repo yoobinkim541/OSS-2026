@@ -553,7 +553,7 @@ class SketchSession:
             s["simulation"] = self.sim["summary"] if self.sim else None
             return s
 
-    def render(self, kind, region_mm=None, numbered=False, max_px=1000):
+    def render(self, kind, region_mm=None, numbered=False, max_px=1000, show_candidates=False, overlay=0.0):
         """에이전트·화면용 그림 (BGR). kind: original | 단계 id | edit | lines | strokes | paper"""
         with self.lock:
             if kind == "original":
@@ -567,7 +567,10 @@ class SketchSession:
             if kind == "lines":
                 return stages.STAGE_BY_ID["edges"].preview(r["stages"]["edges"])
             if kind == "edit":
-                return stages.draw_strokes_colored(r["strokes_px"], r["base"].shape)
+                region_px = self._region_px(region_mm) if region_mm else None
+                views = self.proposal_views() if self.proposals else []
+                return edits.render_edit_view(r["base"].shape, self.table, views, region_px, numbered,
+                                              show_candidates, self.color, float(overlay), max_px)
             if kind == "paper":
                 return r["paper"].copy()
             if kind == "strokes":

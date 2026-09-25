@@ -125,3 +125,70 @@ def remove_matching(strokes, removed, shape):
         else:
             keep.append(i)
     return keep, hit
+
+
+LABEL_MIN_PX = 20        # 화면에서 이보다 짧은 획은 번호를 붙이지 않음
+LABEL_MAX = 400          # 번호 딱지 최대 개수 (제안 딱지는 항상)
+
+
+def _label(img, text, xy, color):
+    x, y = int(xy[0]) + 3, int(xy[1]) - 3
+    cv2.putText(img, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 3, cv2.LINE_AA)
+    cv2.putText(img, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1, cv2.LINE_AA)
+
+
+def _dashed(img, pts, color):
+    for k, (a, b) in enumerate(zip(pts[:-1], pts[1:])):
+        if k % 2 == 0:
+            cv2.line(img, tuple(int(v) for v in a), tuple(int(v) for v in b), color, 1, cv2.LINE_AA)
+
+
+def render_edit_view(shape, table, views, region_px=None, numbered=True, show_candidates=False,
+                     original=None, alpha=0.0, max_px=1000):
+    """편집 화면: 획(회색), 후보(연회색 점선), 제안(빨강=사라짐, 초록=생김)과 번호."""
+    h, w = shape[:2]
+    x0, y0, x1, y1 = region_px if region_px else (0, 0, w, h)
+    x0, y0, x1, y1 = max(0.0, x0), max(0.0, y0), min(float(w), x1), min(float(h), y1)
+    scale = max_px / max(x1 - x0, y1 - y0, 1.0)
+    W, H = max(1, int((x1 - x0) * scale)), max(1, int((y1 - y0) * scale))
+    img = np.full((H, W, 3), 255, np.uint8)
+    if original is not None and alpha > 0:
+        crop = original[int(y0):int(np.ceil(y1)), int(x0):int(np.ceil(x1))]
+        if crop.size:
+            crop = cv2.resize(crop, (W, H), interpolation=cv2.INTER_AREA)
+            img = (crop.astype(np.float32) * alpha + 255 * (1 - alpha)).astype(np.uint8)
+
+    def to_px(p):
+        return np.round((np.asarray(p) - (x0, y0)) * scale).astype(np.int32)
+
+    def visible(q):
+        return ((q[:, 0] >= 0) & (q[:, 0] < W) & (q[:, 1] >= 0) & (q[:, 1] < H)).any()
+
+    labels = []
+    for i, e in sorted(table.items()):
+        if e["kind"] == "candidate" and show_candidates:
+            q = to_px(densify(e["poly"], 3.0))
+            if visible(q):
+                _dashed(img, q, CANDIDATE)
+                labels.append((i, q, CANDIDATE))
+        elif e["kind"] == "stroke":
+            q = to_px(e["poly"])
+            if visible(q):
+                cv2.polylines(img, [q.reshape(-1, 1, 2)], False, INK, 1, cv2.LINE_AA)
+                labels.append((i, q, INK))
+    if numbered:
+        drawn = 0
+        for i, q, color in labels:
+            if drawn >= LABEL_MAX:
+                break
+            if np.hypot(*np.diff(q, axis=0).T).sum() >= LABEL_MIN_PX:
+                _label(img, str(i), q[len(q) // 2], color)
+                drawn += 1
+    for v in views:   # 제안은 굵게(3px, 색을 정확히 칠하려고 LINE_8), 번호 딱지는 항상
+        for key, color in (("before", RED), ("after", GREEN)):
+            if v[key] is not None:
+                q = to_px(v[key])
+                cv2.polylines(img, [q.reshape(-1, 1, 2)], False, color, 3, cv2.LINE_8)
+        q = to_px(v["after"] if v["after"] is not None else v["before"])
+        _label(img, str(v["id"]), q[len(q) // 2], GREEN if v["after"] is not None else RED)
+    return img
