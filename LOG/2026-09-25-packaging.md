@@ -144,6 +144,17 @@ GitHub API로 적용했습니다(`PUT /repos/yoobinkim541/OSS-2026/branches/main
 
 버전은 0.1.1로 올렸습니다.
 
+**검증과 공개**
+- 수동 실행(run 36102271309): 전 단계가 성공했습니다.
+  - Inno Setup 컴파일 61초
+  - 러너에서 시작 메뉴 `Mirobot Sketch\Mirobot Sketch.lnk` 생성 확인
+  - 설치된 `mirobot.exe sim` 실행 성공
+  - 제거 후 파일 삭제 확인
+- `v0.1.1` 태그 릴리스(run 36103549610): 성공
+  - https://github.com/yoobinkim541/OSS-2026/releases/tag/v0.1.1
+  - `MirobotSketch-Setup-0.1.1.exe` 89MB, `MirobotSketch-v0.1.1-windows-x64.zip` 130MB
+- 이 PC에 설치 프로그램을 실제로 설치해 보지는 않았습니다(러너에서만 검증). 이 PC는 저장소 코드용 바로가기를 씁니다.
+
 ## 남은 일
 
 - (선택) ROS 2 Humble 시뮬레이션용 Dockerfile
