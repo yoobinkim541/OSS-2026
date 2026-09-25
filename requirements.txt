@@ -1,9 +1,4 @@
-# 핵심 (CV 파이프라인 + 로봇 실행기)
-opencv-python>=4.8
-numpy>=1.24
-scikit-image>=0.21
-matplotlib>=3.7
-pyserial>=3.5
-# 선택: 배경 제거 (--rembg / GUI 체크박스)
-# rembg[cpu]>=2.0
-# pillow>=10
+# 의존성 목록은 pyproject.toml에 있습니다. 이 파일은 "pip install -r requirements.txt" 호환용입니다.
+#   배경 제거까지:  pip install -e ".[rembg]"
+#   .exe 빌드까지:  pip install -e ".[build]"
+-e .

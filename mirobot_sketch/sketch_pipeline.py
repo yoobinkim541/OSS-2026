@@ -1,13 +1,15 @@
 """
 사진 -> 로봇용 획(stroke) 추출 파이프라인
 ==========================================
-GUI(gui_sketch.py)와 CLI(make_strokes.py)가 같이 쓰는 공용 모듈입니다.
+GUI(gui.py)와 CLI(make_strokes.py)가 같이 쓰는 공용 모듈입니다.
 
 단계:
   1. load_gray / remove_background : 이미지 읽기(+선택적 배경 제거), 크기 정규화
   2. compute_edges                 : Gaussian blur + Canny
   3. trace_strokes                 : 엣지를 1px 중심선으로 만든 뒤 픽셀 그래프를
                                      따라가며 "한 번씩만" 지나가는 획으로 분리
+  3b. dedupe_strokes               : 펜 굵기보다 가까운 이중선(굵은 선의 양쪽 경계) 하나로
+  3c. merge_strokes                : 끝점이 만나는 획을 이어 붙여 펜 올림 횟수 줄이기
   4. simplify_strokes              : approxPolyDP로 점 개수 줄이기
   5. order_strokes                 : 가까운 끝점부터 이어 펜업 이동 거리 줄이기
   6. stroke_metrics                : 획 수, 점 수, 펜다운/펜업 거리
@@ -61,18 +63,41 @@ def load_gray(img_path, max_side=DEFAULT_MAX_SIDE):
     return resize_max_side(img, max_side)
 
 
-def remove_background(img_path, max_side=DEFAULT_MAX_SIDE):
+def remove_background(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
     """rembg로 배경을 제거하고 흰 배경 위에 합성한 회색조 이미지를 반환합니다.
-    rembg는 선택 기능이라 필요할 때만 import 합니다 (첫 실행 시 모델 다운로드)."""
-    from PIL import Image
-    from rembg import remove
+    rembg는 선택 기능이라 필요할 때만 import 합니다 (첫 실행 시 모델 다운로드).
+
+    cache_dir를 주면 결과를 원본 파일 내용의 해시 이름으로 저장해 두고 재사용합니다
+    (rembg는 이미지 한 장에 약 1분 — GUI를 다시 열 때마다 기다리지 않도록)."""
+    import hashlib
+    from pathlib import Path
 
     with open(img_path, "rb") as f:
-        output_bytes = remove(f.read())
-    fg = Image.open(io.BytesIO(output_bytes)).convert("RGBA")
+        data = f.read()
+    cache_file = None
+    if cache_dir:
+        cache_file = Path(cache_dir) / f"rembg_{hashlib.sha1(data).hexdigest()[:16]}.png"
+        if cache_file.exists():
+            cached = cv2.imdecode(np.fromfile(str(cache_file), np.uint8), cv2.IMREAD_GRAYSCALE)
+            if cached is not None:
+                return resize_max_side(cached, max_side)
+
+    from PIL import Image
+    try:
+        from rembg import remove
+    except ImportError as e:
+        raise RuntimeError(
+            "배경 제거(rembg)가 설치되어 있지 않습니다. "
+            "pip install \"mirobot-sketch[rembg]\" 로 설치하거나 배경 제거를 끄세요."
+        ) from e
+
+    fg = Image.open(io.BytesIO(remove(data))).convert("RGBA")
     white_bg = Image.new("RGBA", fg.size, (255, 255, 255, 255))
-    composited = Image.alpha_composite(white_bg, fg).convert("L")
-    return resize_max_side(np.array(composited), max_side)
+    composited = np.array(Image.alpha_composite(white_bg, fg).convert("L"))
+    if cache_file is not None:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imencode(".png", composited)[1].tofile(str(cache_file))
+    return resize_max_side(composited, max_side)
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +272,139 @@ def trace_strokes(edges, min_length_px=15, spur_px=6):
     return out
 
 
+def _densify(s):
+    """획을 1px 간격의 연속 픽셀 점으로 채웁니다."""
+    s = np.asarray(s, dtype=np.float64)
+    out = [s[0]]
+    for a, b in zip(s[:-1], s[1:]):
+        n = max(1, int(np.ceil(np.hypot(*(b - a)))))
+        out.extend(a + (b - a) * (k / n) for k in range(1, n + 1))
+    return np.round(np.array(out)).astype(np.int32)
+
+
+def dedupe_strokes(strokes, shape, dist_px=4, min_keep_px=8, overlap_px=2):
+    """이미 그린 선과 dist_px 안에서 겹치는 부분을 지웁니다 (이중선 제거).
+
+    Canny는 굵은 선의 양쪽 경계를 각각 잡아 한 선을 두 줄로 만듭니다. 펜 굵기
+    (약 0.5mm = 800px 이미지를 100mm로 그릴 때 4px)보다 가까운 두 선은 종이에서
+    구별되지 않으므로 하나만 그리면 됩니다.
+    - 긴 획부터, 획을 따라가며 지나간 점 주위(dist_px)를 "그린 영역"으로 표시한다.
+      표시는 조금 뒤(lag)에서 따라오므로, 한 획이 양 끝에서 이어진 굵은 선의 두 경계
+      (닫힌 획 하나)처럼 스스로 되돌아와 겹치는 경우도 잡는다.
+    - 그린 영역 밖의 구간만 남긴다 (min_keep_px보다 짧은 조각은 버림, 경계에서
+      overlap_px만큼 겹치게 남겨 끊김을 막음).
+    엣지를 부풀려 합치는 방식은 가까운 선들이 세포 모양 그물로 뭉쳐 눈·입이 망가져
+    쓰지 않았습니다 (LOG 참고).
+    """
+    order = sorted(range(len(strokes)), key=lambda i: -polyline_length(strokes[i]))
+    occ = np.zeros(shape[:2], np.uint8)
+    h, w = occ.shape
+    lag = 3 * dist_px + 2  # 바로 앞 점들은 자기 자신이므로 이만큼 뒤의 점부터 표시
+    out = []
+    for i in order:
+        pts = _densify(strokes[i])
+        xs, ys = np.clip(pts[:, 0], 0, w - 1), np.clip(pts[:, 1], 0, h - 1)
+        n = len(pts)
+        free = np.zeros(n, dtype=bool)
+        for k in range(n):
+            free[k] = occ[ys[k], xs[k]] == 0
+            m = k - lag
+            if m >= 0 and free[m]:
+                cv2.circle(occ, (int(xs[m]), int(ys[m])), dist_px, 255, -1)
+        for m in range(max(0, n - lag), n):
+            if free[m]:
+                cv2.circle(occ, (int(xs[m]), int(ys[m])), dist_px, 255, -1)
+        k = 0
+        while k < n:
+            if not free[k]:
+                k += 1
+                continue
+            j = k
+            while j < n and free[j]:
+                j += 1
+            a, b = max(0, k - overlap_px), min(n, j + overlap_px)
+            if b - a >= min_keep_px:
+                out.append(pts[a:b])
+            k = j
+    return out
+
+
+def merge_strokes(strokes, join_px=2.0, tangent_px=5):
+    """끝점이 만나는 획들을 펜을 떼지 않는 긴 획으로 이어 붙입니다.
+
+    분기점에서 나뉜 획들은 같은 점(또는 join_px 이내)에서 만나므로, 이어서 그려도
+    종이 위 결과는 같고 펜 올림·내림 횟수만 줄어듭니다.
+    - 획 끝점을 join_px 이내끼리 하나의 노드로 묶고, 획을 노드 사이의 간선으로 본다.
+    - 홀수 차수 노드(선이 끝나는 곳)부터 출발해, 쓰지 않은 간선을 따라 걷는다.
+      갈래가 여러 개면 진행 방향이 가장 덜 꺾이는 쪽을 고른다.
+    반환: 이어 붙인 획 리스트 ((N,2) int 배열, 점 순서 (x, y)).
+    """
+    from scipy.spatial import cKDTree
+
+    strokes = [np.asarray(s, dtype=np.int32) for s in strokes if len(s) >= 2]
+    n = len(strokes)
+    if n < 2 or join_px <= 0:
+        return strokes
+
+    # 끝점 2n개를 가까운 것끼리 묶기 (union-find)
+    ends = np.array([p for s in strokes for p in (s[0], s[-1])], dtype=np.float64)
+    parent = list(range(2 * n))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for a, b in cKDTree(ends).query_pairs(join_px):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+    node_of_end = [find(k) for k in range(2 * n)]  # 끝점 k = 2*i(앞), 2*i+1(뒤)
+
+    incident = {}
+    for k, node in enumerate(node_of_end):
+        incident.setdefault(node, []).append(k)
+    used = [False] * n
+
+    def oriented(k):
+        """끝점 k에서 출발하도록 방향을 맞춘 획."""
+        s = strokes[k // 2]
+        return s if k % 2 == 0 else s[::-1]
+
+    def direction(pts, at_start):
+        m = min(tangent_px, len(pts) - 1)
+        v = (pts[m] - pts[0]) if at_start else (pts[-1] - pts[-1 - m])
+        norm = np.hypot(*v)
+        return v / norm if norm > 0 else np.zeros(2)
+
+    def walk(node, heading):
+        path = []
+        while True:
+            options = [k for k in incident[node] if not used[k // 2]]
+            if not options:
+                return path
+            if heading is None:
+                k = options[0]
+            else:
+                k = max(options, key=lambda kk: float(np.dot(heading, direction(oriented(kk), True))))
+            used[k // 2] = True
+            seg = oriented(k)
+            path.append(seg if not path else seg[1:] if tuple(seg[0]) == tuple(path[-1][-1]) else seg)
+            heading = direction(seg, False)
+            node = node_of_end[k ^ 1]  # 반대쪽 끝점의 노드
+
+    # 홀수 차수 노드에서 먼저 출발해야 획 수가 최소에 가까워짐
+    starts = sorted(incident, key=lambda nd: len(incident[nd]) % 2 == 0)
+    merged = []
+    for node in starts:
+        while any(not used[k // 2] for k in incident[node]):
+            path = walk(node, None)
+            if path:
+                merged.append(np.vstack(path).astype(np.int32))
+    return merged
+
+
 def extract_strokes_contour(edges, min_length_px=15):
     # 참고: 여기의 min_length_px는 기존 코드와 같이 "윤곽 하나의 길이" 기준
     """(비교용) 기존 방식: findContours 윤곽을 그대로 획으로 사용. 선이 두 번 그려짐."""
@@ -375,13 +533,17 @@ def stroke_metrics(strokes, start=None):
 
 def run_pipeline(gray_img, canny_low=50, canny_high=150, blur_ksize=5,
                  min_length_px=15, epsilon_px=2.0, method="skeleton", line_source="canny",
-                 median_ksize=0):
+                 median_ksize=0, merge_join_px=4.0, dedupe_px=4):
     """회색조 이미지 -> (선 후보 이미지, 정렬된 획 리스트).
 
     line_source:  "canny"(사진 윤곽) | "dark"(선화: 어두운 선의 중심선)
     method:       "skeleton"(한 번씩만 지나감) | "contour"(비교용 기존 방식)
     median_ksize: 0이 아니면 먼저 미디언 블러. 만화 스크린톤(망점)처럼 작은 무늬를
                   지우고 선의 경계는 남긴다 (만화 1장: 2726획 -> 175획, 7px 기준).
+    dedupe_px:     0이 아니면 이 거리 안에서 겹치는 이중선을 하나만 남긴다. 기본 4px은
+                   Canny 블러(5px) 때문에 2px 선의 양쪽 경계가 4px 떨어져 잡히는 것에 맞춤.
+    merge_join_px: 0이 아니면 끝점이 이 거리 안에서 만나는 획을 이어 붙여 펜 올림을
+                   줄인다. 기본 4px은 100mm로 그릴 때 약 0.5mm(펜 굵기 수준).
     """
     if median_ksize and median_ksize > 1:
         k = int(median_ksize)
@@ -394,6 +556,10 @@ def run_pipeline(gray_img, canny_low=50, canny_high=150, blur_ksize=5,
         raw = extract_strokes_contour(edges, min_length_px)
     else:
         raw = trace_strokes(edges, min_length_px)
+        if dedupe_px:
+            raw = dedupe_strokes(raw, edges.shape, dedupe_px)
+        if merge_join_px:
+            raw = merge_strokes(raw, merge_join_px)
     strokes = order_strokes(simplify_strokes(raw, epsilon_px))
     return edges, strokes
 

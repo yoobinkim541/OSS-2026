@@ -90,6 +90,45 @@ def check_within_paper(strokes_mm, paper_mm=A4_LANDSCAPE_MM, margin_mm=DEFAULT_M
     return bad
 
 
+def render_paper_preview(strokes_mm, line_width_mm=0.5, px_per_mm=4.0, paper_mm=A4_LANDSCAPE_MM,
+                         limit_mm=None, pending_limit_mm=None):
+    """A4 위에 실제 크기·펜 굵기로 그린 모습을 BGR 이미지로 만듭니다 (GUI 미리보기).
+
+    - 종이: 흰 바탕, 회색 테두리
+    - limit_mm: 실행기 허용 범위(±mm) 파란 점선, pending_limit_mm: 실물 미확인 범위 주황 점선
+    - 선 굵기 = line_width_mm x px_per_mm (촘촘한 선이 실제로 뭉개지는지 볼 수 있음)
+    """
+    import cv2
+
+    w, h = int(round(paper_mm[0] * px_per_mm)), int(round(paper_mm[1] * px_per_mm))
+    img = np.full((h, w, 3), 255, np.uint8)
+    cx, cy = w / 2.0, h / 2.0
+
+    def to_px(x, y):
+        return int(round(cx + x * px_per_mm)), int(round(cy - y * px_per_mm))
+
+    def dashed_rect(half, color):
+        pts = [(-half, -half), (half, -half), (half, half), (-half, half), (-half, -half)]
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            n = max(1, int(np.hypot(x1 - x0, y1 - y0) / 3))
+            for k in range(0, n, 2):
+                a = to_px(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n)
+                b = to_px(x0 + (x1 - x0) * (k + 1) / n, y0 + (y1 - y0) * (k + 1) / n)
+                cv2.line(img, a, b, color, 1, cv2.LINE_AA)
+
+    if pending_limit_mm:
+        dashed_rect(pending_limit_mm, (0, 140, 255))
+    if limit_mm:
+        dashed_rect(limit_mm, (200, 120, 30))
+    cv2.drawMarker(img, to_px(0, 0), (160, 160, 160), cv2.MARKER_CROSS, 12, 1)
+    thick = max(1, int(round(line_width_mm * px_per_mm)))
+    for s in strokes_mm:
+        pts = np.array([to_px(x, y) for x, y in np.asarray(s)], np.int32).reshape(-1, 1, 2)
+        cv2.polylines(img, [pts], False, (30, 30, 30), thick, cv2.LINE_AA)
+    cv2.rectangle(img, (0, 0), (w - 1, h - 1), (150, 150, 150), 2)
+    return img
+
+
 def build_strokes_document(strokes_mm, placement, metrics_mm=None, source=None):
     return {
         "schema_version": SCHEMA_VERSION,

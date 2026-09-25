@@ -1,0 +1,55 @@
+# v* 태그를 push하면 Windows .exe를 빌드해 GitHub Releases에 올림
+#   git tag v0.1.0 && git push origin v0.1.0
+# 수동 실행(workflow_dispatch)은 빌드 결과를 Actions 아티팩트로만 남김
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 로그의 한글 출력 (Windows 러너 기본 인코딩은 cp1252)
+env:
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: 설치 (rembg 제외)
+        run: python -m pip install -e ".[build]"
+      - name: 테스트
+        run: python -m unittest discover -s tests
+      - name: PyInstaller 빌드
+        run: pyinstaller packaging/mirobot_sketch.spec --noconfirm
+      - name: 빌드된 exe 동작 확인
+        shell: pwsh
+        run: |
+          $env:APPDATA = "$env:RUNNER_TEMP\appdata"
+          dist\MirobotSketch\mirobot.exe draw trajectories\orientation-test-F.json --gcode-out F.gcode
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          dist\MirobotSketch\mirobot.exe sim trajectories\orientation-test-F.json
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: 압축
+        shell: pwsh
+        run: |
+          $name = "MirobotSketch-${{ github.ref_name }}-windows-x64.zip" -replace '/', '-'
+          Compress-Archive -Path dist\MirobotSketch -DestinationPath $name
+          echo "ZIP=$name" >> $env:GITHUB_ENV
+      - uses: actions/upload-artifact@v7
+        with:
+          name: MirobotSketch-windows-x64
+          path: ${{ env.ZIP }}
+      - name: GitHub Release에 올리기
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: ${{ env.ZIP }}
+          generate_release_notes: true

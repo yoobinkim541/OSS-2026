@@ -8,8 +8,8 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "robot"))
-import draw_executor as de  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from mirobot_sketch import draw_executor as de  # noqa: E402
 
 CFG = de.load_config()
 
@@ -85,6 +85,23 @@ class PlannerTest(unittest.TestCase):
     def test_gcode_format(self):
         line = de.Planner(CFG).plan(SQUARE)[0][0]
         self.assertRegex(line, r"^M20 G90 G01 X[-\d.]+ Y[-\d.]+ Z[-\d.]+ A[-\d.]+ B[-\d.]+ C[-\d.]+ F\d+$")
+
+
+class TimingTest(unittest.TestCase):
+    def test_command_count_matches_plan(self):
+        strokes = SQUARE + [[(0.0, 0.0), (5.0, 5.0)]]
+        t = de.estimate_time(strokes, CFG)
+        self.assertEqual(t["command_count"], len(de.Planner(CFG).plan(strokes)))
+
+    def test_pen_lift_grows_with_stroke_count(self):
+        # 같은 길이를 1획으로 그릴 때와 10획으로 쪼갤 때: 펜 올림·내림 시간만 늘어남
+        one = [[(float(x), 0.0) for x in range(-10, 11, 2)]]
+        many = [[(float(x), 0.0), (float(x + 2), 0.0)] for x in range(-10, 10, 2)]
+        t1, t10 = de.estimate_time(one, CFG), de.estimate_time(many, CFG)
+        self.assertAlmostEqual(t1["draw_s"], t10["draw_s"], places=1)
+        per_stroke = 2 * CFG["pen"]["up_clearance_mm"] / CFG["feeds_mm_per_min"]["approach"] * 60
+        self.assertAlmostEqual(t10["pen_lift_s"] - t1["pen_lift_s"], 9 * per_stroke, places=0)
+        self.assertGreater(t10["total_s"], t1["total_s"])
 
 
 class SafetyOptionTest(unittest.TestCase):

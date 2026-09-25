@@ -1,0 +1,38 @@
+# push / PR마다 테스트: Windows(실제 사용 환경) + Ubuntu, Python 3.11 / 3.13
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 로그의 한글 출력 (Windows 러너 기본 인코딩은 cp1252)
+env:
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: OpenCV 시스템 라이브러리 (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0
+      - name: 설치
+        run: python -m pip install -e .
+      - name: 테스트
+        run: python -m unittest discover -s tests -v
+      - name: 명령줄 도구 동작 확인 (dry-run)
+        run: |
+          mirobot-draw trajectories/orientation-test-F.json --gcode-out F.gcode
+          mirobot-sim trajectories/orientation-test-F.json

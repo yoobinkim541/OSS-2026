@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mirobot-sketch"
+dynamic = ["version"]
+description = "사진을 WLKATA Mirobot 로봇 팔이 펜으로 그릴 수 있는 선 경로로 변환하고 실행하는 도구"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Yoobin Kim" }]
+keywords = ["robotics", "opencv", "drawing", "mirobot", "sketch"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "scikit-image>=0.21",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "pillow>=10",
+    "pyserial>=3.5",
+    "customtkinter>=5.2",
+]
+
+[project.optional-dependencies]
+# 배경 제거: 첫 실행 때 AI 모델(약 170MB)을 내려받음
+rembg = ["rembg[cpu]>=2.0"]
+# Windows .exe 빌드
+build = ["pyinstaller>=6.0"]
+
+[project.urls]
+Repository = "https://github.com/yoobinkim541/OSS-2026"
+
+# 콘솔 없이 창만 뜨는 GUI
+[project.gui-scripts]
+mirobot-sketch = "mirobot_sketch.gui:main"
+
+[project.scripts]
+mirobot-strokes = "mirobot_sketch.make_strokes:main"
+mirobot-draw = "mirobot_sketch.draw_executor:main"
+mirobot-sim = "mirobot_sketch.mirobot_sim:main"
+
+[tool.setuptools]
+packages = ["mirobot_sketch"]
+
+[tool.setuptools.dynamic]
+version = { attr = "mirobot_sketch.__version__" }
+
+[tool.setuptools.package-data]
+mirobot_sketch = ["data/*.json", "data/*.png", "data/*.ico"]

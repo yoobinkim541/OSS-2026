@@ -11,9 +11,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "CV"))
-import paper_mapping as pm  # noqa: E402
-import sketch_pipeline as sp  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from mirobot_sketch import paper_mapping as pm  # noqa: E402
+from mirobot_sketch import sketch_pipeline as sp  # noqa: E402
 
 
 def blank(h=200, w=300):
@@ -78,6 +78,63 @@ class TraceStrokesTest(unittest.TestCase):
         self.assertLess(dark_len, 290)
 
 
+class MergeStrokesTest(unittest.TestCase):
+    def test_t_junction_three_strokes_become_two(self):
+        # 끝점 3개(홀수) + 분기점(차수 3, 홀수) -> 홀수 노드 4개 -> 최소 2획
+        e = blank(200, 200)
+        cv2.line(e, (20, 50), (180, 50), 255, 1)
+        cv2.line(e, (100, 50), (100, 180), 255, 1)
+        raw = sp.trace_strokes(e, 5)
+        merged = sp.merge_strokes(raw)
+        self.assertEqual(len(raw), 3)
+        self.assertEqual(len(merged), 2)
+
+    def test_cross_continues_straight(self):
+        # "+" 모양: 교차점에서 가장 덜 꺾이는 쪽으로 이어야 가로 1획 + 세로 1획
+        e = blank(200, 200)
+        cv2.line(e, (20, 100), (180, 100), 255, 1)
+        cv2.line(e, (100, 20), (100, 180), 255, 1)
+        merged = sp.merge_strokes(sp.trace_strokes(e, 5))
+        self.assertEqual(len(merged), 2)
+        for s in merged:
+            span = s.max(axis=0) - s.min(axis=0)
+            self.assertLess(min(span), 4)  # 각 획이 한 방향으로 곧음
+
+    def test_merging_draws_the_same_pixels(self):
+        img = np.full((300, 400), 255, np.uint8)
+        cv2.putText(img, "MIROBOT", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 2.0, 0, 5)
+        raw = sp.trace_strokes(sp.compute_dark_mask(img), 15)
+        merged = sp.merge_strokes(raw)
+        a = sp.draw_strokes_image(raw, img.shape)
+        b = sp.draw_strokes_image(merged, img.shape)
+        self.assertLess(len(merged), len(raw))
+        self.assertLess(np.count_nonzero(a != b), 0.01 * np.count_nonzero(a))
+
+
+class DedupeTest(unittest.TestCase):
+    def test_close_parallel_lines_become_one(self):
+        e = blank(100, 300)
+        cv2.line(e, (20, 50), (280, 50), 255, 1)
+        cv2.line(e, (20, 53), (280, 53), 255, 1)   # 3px 옆 = 굵은 선의 반대쪽 경계
+        out = sp.dedupe_strokes(sp.trace_strokes(e, 5), e.shape, dist_px=3)
+        self.assertAlmostEqual(sum(sp.polyline_length(s) for s in out), 260, delta=10)
+
+    def test_separate_lines_are_kept(self):
+        e = blank(100, 300)
+        cv2.line(e, (20, 40), (280, 40), 255, 1)
+        cv2.line(e, (20, 60), (280, 60), 255, 1)   # 20px 떨어진 별개의 선
+        out = sp.dedupe_strokes(sp.trace_strokes(e, 5), e.shape, dist_px=3)
+        self.assertAlmostEqual(sum(sp.polyline_length(s) for s in out), 520, delta=10)
+
+    def test_thick_line_drawn_once_by_default_pipeline(self):
+        img = np.full((100, 300), 255, np.uint8)
+        cv2.line(img, (20, 50), (280, 50), 0, 2)   # Canny 경계 두 줄이 4px 떨어져 잡힘
+        _, st = sp.run_pipeline(img)
+        self.assertLess(sum(sp.polyline_length(s) for s in st), 330)
+        _, st_off = sp.run_pipeline(img, dedupe_px=0)
+        self.assertGreater(sum(sp.polyline_length(s) for s in st_off), 450)
+
+
 class ResizeTest(unittest.TestCase):
     def test_small_image_is_upscaled_to_max_side(self):
         # 저해상도 원본도 긴 변 800px로 맞춰야 px 파라미터 의미가 같고 선이 매끄러움
@@ -140,6 +197,15 @@ class PaperMappingTest(unittest.TestCase):
         self.assertAlmostEqual(pts[:, 1].min() + pts[:, 1].max(), 0)
         self.assertAlmostEqual(pts[0][1], 25)  # 이미지 위쪽 -> 종이 위쪽(+)
         self.assertEqual(pm.check_within_paper(mm), 0)
+
+    def test_paper_preview_size_and_ink(self):
+        line = [np.array([[-40.0, 0.0], [40.0, 0.0]])]
+        img = pm.render_paper_preview(line, line_width_mm=0.5, px_per_mm=4.0)
+        self.assertEqual(img.shape, (840, 1188, 3))            # A4 297x210mm x 4px/mm
+        column = img[:, 594, 0]                                 # 가운데 세로줄
+        dark = np.nonzero(column < 128)[0]
+        self.assertTrue(abs(dark.mean() - 420) < 2)             # 선이 종이 중심 높이에
+        self.assertLessEqual(len(dark), 3)                      # 0.5mm = 2px 굵기 (+안티앨리어싱)
 
     def test_box_larger_than_paper_rejected(self):
         with self.assertRaises(ValueError):

@@ -12,3 +12,8 @@ CV/experiments/*.png
 
 # 입력 사진 (저작권 확인 전 로컬 전용)
 input/
+
+# 빌드 결과물
+build/
+dist/
+*.egg-info/
