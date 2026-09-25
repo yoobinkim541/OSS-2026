@@ -99,6 +99,20 @@ mirobot-draw out/photo.json --execute
 
 그리기 범위를 ±50mm에서 ±60mm로 넓히는 절차는 `robot/drawing_config.json`의 `_limits_pending_note`를 따릅니다.
 
+### 에이전트 패널 (대화로 편집)
+
+GUI 오른쪽 위 **✦ 에이전트** 버튼을 누르면 채팅 패널이 열립니다. "획이 너무 많아, 15분 안에 끝나게 해줘", "배경 잡음을 지워줘"처럼 말하면, 에이전트가 원본과 결과 그림을 직접 보고 처리 설정을 바꾸거나 필요 없는 획을 지웁니다. 바뀐 내용은 왼쪽 설정과 미리보기에 바로 반영됩니다.
+
+| 연결 방식 | 준비 |
+|---|---|
+| **Claude Code** | Claude Code를 설치하고 `claude`로 로그인해 둡니다. 앱이 `claude -p`를 실행하고, 앱 도구는 MCP 서버로 연결합니다. |
+| **Codex** | Codex CLI를 설치하고 로그인해 둡니다. 앱이 `codex exec`를 실행합니다. |
+| **OpenRouter** | 패널의 ⚙ 설정에서 API 키를 입력합니다(Windows 자격 증명 관리자에 저장). 기본 모델은 `anthropic/claude-opus-5`이고, 도구 호출과 이미지를 지원하는 모델 중에서 고를 수 있습니다. |
+
+에이전트가 쓰는 도구는 상태 보기, 그림 보기(원본 / 선 후보 / 종이 / 번호 붙은 획), 설정 변경, 획 삭제, 영역 삭제, 되돌리기, 시뮬레이션입니다. **로봇을 움직이는 도구는 없습니다.** 실제 드로잉은 지금처럼 사용자가 내보낸 뒤 실행기에서 `yes`를 입력해야 시작됩니다.
+
+개발 환경에서 에이전트를 쓰려면 `pip install -e ".[agent]"`로 필요한 패키지(mcp, keyring, requests)를 설치합니다.
+
 ### 3D 시뮬레이션 (로봇 없이 확인)
 
 실행기와 같은 경로로 Mirobot 기구학(IK)을 풀어 관절 한계(Soft limit)를 넘는지 검사합니다.
@@ -143,6 +157,7 @@ python -m unittest discover -s tests -v
 | `CV/` | 저장소용 실행 파일(`gui_sketch.py`, `make_strokes.py`), `experiments/`는 학습 단계 스크립트 |
 | `robot/` | 로봇 설정(`drawing_config.json`), 저장소용 실행기 진입점, 초기 시리얼·그리퍼·펌프 시험 코드 |
 | `sim/` | 저장소용 시뮬레이터 진입점, RViz 재생(WSL2 ROS 2) |
+| `mirobot_sketch/agent/` | 에이전트: 도구 정의, 대화 백엔드(OpenRouter / Claude Code / Codex), MCP 서버, 로컬 브리지, 채팅 패널 |
 | `packaging/` | PyInstaller 빌드 설정과 .exe 진입점 |
 | `.github/workflows/` | CI(테스트), Release(태그 push 시 .exe 빌드) |
 | `assets/` | 앱 아이콘과 생성 스크립트 |

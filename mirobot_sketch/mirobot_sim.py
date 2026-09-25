@@ -192,6 +192,18 @@ def simulate(targets, step_mm=1.0):
     }
 
 
+def trajectory_doc(result, cfg, source):
+    """시뮬레이션 결과를 RViz 재생용 관절 궤적 문서로 (sim/rviz_playback.py가 읽는 형식)."""
+    tip = pen_tip_offset(cfg)
+    return {
+        "joint_names": JOINT_NAMES, "units": "rad", "step_mm": 1.0, "source": str(source),
+        "pen_tip_offset_mm": tip.tolist(),
+        "points": [{"q": [round(float(v), 5) for v in s[0]], "tcp_mm": [round(float(v), 3) for v in s[1]],
+                    "pen_tip_mm": [round(float(v), 3) for v in s[1] + tip],
+                    "pen_down": bool(s[3]), "command": s[2]} for s in result["samples"]],
+    }
+
+
 def verdict(result):
     if result["failures"]:
         return "FAIL: 도달 불가(IK 실패)"
@@ -395,15 +407,7 @@ def main():
         save_animation(result, args.gif, cfg)
         print(f"3D 애니메이션: {args.gif}")
     if args.export:
-        tip = pen_tip_offset(cfg)
-        traj = {
-            "joint_names": JOINT_NAMES, "units": "rad", "step_mm": 1.0, "source": title,
-            "pen_tip_offset_mm": tip.tolist(),
-            "points": [{"q": [round(float(v), 5) for v in s[0]], "tcp_mm": [round(float(v), 3) for v in s[1]],
-                        "pen_tip_mm": [round(float(v), 3) for v in s[1] + tip],
-                        "pen_down": bool(s[3]), "command": s[2]} for s in result["samples"]],
-        }
-        args.export.write_text(json.dumps(traj, ensure_ascii=False), encoding="utf-8")
+        args.export.write_text(json.dumps(trajectory_doc(result, cfg, title), ensure_ascii=False), encoding="utf-8")
         print(f"관절 궤적: {args.export}")
     return 5 if verdict(result).startswith("FAIL") else 0
 

@@ -63,6 +63,23 @@ def load_gray(img_path, max_side=DEFAULT_MAX_SIDE):
     return resize_max_side(img, max_side)
 
 
+def load_color(img_path, max_side=DEFAULT_MAX_SIDE):
+    """화면 표시용 컬러 원본 (BGR). load_gray와 같은 크기로 맞춰 좌표가 일치합니다.
+    투명 PNG는 흰 배경 위에 합성합니다 (그냥 읽으면 투명 부분이 검게 보임)."""
+    data = np.fromfile(str(img_path), dtype=np.uint8)
+    img = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise ValueError(f"이미지를 읽을 수 없습니다: {img_path}")
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    elif img.shape[2] == 4:
+        a = img[:, :, 3:4].astype(np.float32) / 255.0
+        img = (img[:, :, :3] * a + 255 * (1 - a)).astype(np.uint8)
+    if img.dtype != np.uint8:   # 16비트 PNG 등
+        img = cv2.convertScaleAbs(img, alpha=255.0 / max(1, int(img.max())))
+    return resize_max_side(img, max_side)
+
+
 def remove_background(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
     """rembg로 배경을 제거하고 흰 배경 위에 합성한 회색조 이미지를 반환합니다.
     rembg는 선택 기능이라 필요할 때만 import 합니다 (첫 실행 시 모델 다운로드).

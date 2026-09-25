@@ -17,3 +17,6 @@ input/
 build/
 dist/
 *.egg-info/
+
+# 계획 실행 기록 (superpowers)
+.superpowers/
