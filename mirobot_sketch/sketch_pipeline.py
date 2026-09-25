@@ -147,6 +147,29 @@ def compute_dark_mask(gray_img, blur_ksize=5, threshold=None):
     return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 
 
+LAB_AB_GAIN = 2.0  # a·b 채널은 값 범위가 좁아(128 중심) 대비를 늘려 같은 임계값을 씀
+
+
+def compute_edges_lab(bgr_img, canny_low=50, canny_high=150, blur_ksize=5):
+    """색 차이 선 검출: Lab의 L·a·b 채널마다 Canny를 적용해 합칩니다.
+
+    흑백 변환은 밝기가 비슷한 두 색(예: 주황 배경과 머리카락)의 경계를 지워 버립니다.
+    a(초록↔빨강)·b(파랑↔노랑) 채널은 밝기가 같아도 색이 다르면 값이 달라 경계가 남습니다.
+    """
+    k = int(blur_ksize)
+    k = k if k % 2 == 1 else k + 1
+    lab = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2LAB)
+    out = np.zeros(bgr_img.shape[:2], np.uint8)
+    for c in range(3):
+        ch = lab[:, :, c]
+        if c > 0:
+            ch = np.clip(128 + (ch.astype(np.float32) - 128) * LAB_AB_GAIN, 0, 255).astype(np.uint8)
+        if k > 1:
+            ch = cv2.GaussianBlur(ch, (k, k), 0)
+        out |= cv2.Canny(ch, float(canny_low), float(canny_high))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # 3. 획 추적
 # ---------------------------------------------------------------------------
