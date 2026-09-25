@@ -1,0 +1,12 @@
+# 매주 GitHub Actions 버전과 파이썬 의존성의 새 버전을 확인해 PR로 알려 줌
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

@@ -89,11 +89,24 @@
   - zip을 Actions 아티팩트와 GitHub Release에 올립니다(릴리스 노트 자동 생성).
   - 수동 실행하면 아티팩트만 남깁니다.
 - 액션 버전: checkout v7, setup-python v7, upload-artifact v7, action-gh-release v3 (2026-09-25 기준 최신 릴리스)
-- YAML 문법만 로컬에서 확인했습니다. **실제 실행은 push 후 확인해야 합니다.**
+- 첫 실행 결과는 아래 "5. 실제 CI/CD 실행 결과"에 있습니다.
+
+## 5. 실제 CI/CD 실행 결과 (사용자 요청: 커밋·push, MIT 라이선스, 릴리스, CI/CD 구성)
+
+- **MIT 라이선스:** `LICENSE`를 추가했습니다(Copyright 2026 Yoobin Kim). `pyproject.toml`에 `license = "MIT"`와 `license-files`를 지정했고, 이를 위해 setuptools ≥ 77이 필요합니다. 빌드한 wheel 메타데이터에서 `License-Expression: MIT`를 확인했습니다.
+- **커밋:** `02c5a2f`를 push했습니다.
+- **CI 첫 실행 (run 36097865229):** 4개 조합 모두 성공했습니다(각 약 1분). 조합마다 테스트 48개 OK, `mirobot-draw` dry-run 정상, `mirobot-sim` PASS.
+  - GitHub 안내: `ubuntu-latest`가 2026-10-19부터 Ubuntu 26으로 바뀝니다. 지금은 영향이 없고, Dependabot과 CI 결과로 지켜봅니다.
+- **CD (run 36098010961, 태그 `v0.1.0`):** 2분 52초 만에 성공했습니다. 설치 → 테스트 → PyInstaller 빌드 → 빌드된 exe로 draw/sim 확인 → zip → 아티팩트와 Release 업로드.
+- **릴리스:** https://github.com/yoobinkim541/OSS-2026/releases/tag/v0.1.0
+  - `MirobotSketch-v0.1.0-windows-x64.zip`, 130MB
+  - 받아서 이 PC에서 실행해 봤습니다: `mirobot.exe sim` PASS, `mirobot.exe strokes` 정상(485획), `MirobotSketch.exe` 창 뜸(첫 실행 15초).
+- **추가 구성:**
+  - README에 CI, 릴리스, 라이선스 배지를 달았습니다.
+  - `.github/dependabot.yml`: Actions와 pip 의존성을 매주 확인합니다.
 
 ## 남은 일
 
-- push한 뒤 CI 결과를 확인하고, 첫 릴리스 태그(v0.1.0)를 올릴지 결정해야 합니다.
-- 라이선스 파일이 없습니다. 오픈소스 과제라면 LICENSE(예: MIT)를 정해야 합니다. 사용자 결정이 필요합니다.
+- (선택) main 브랜치 보호 규칙: CI 통과를 병합 조건으로 걸기. 저장소 설정 변경이라 사용자가 결정합니다.
 - (선택) ROS 2 Humble 시뮬레이션용 Dockerfile
 - 코드 서명이 없어 SmartScreen이 "알 수 없는 게시자" 경고를 띄울 수 있습니다.

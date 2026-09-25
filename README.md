@@ -9,6 +9,10 @@
 
 <img src="assets/app_icon_256.png" width="128" alt="앱 아이콘: 로봇 팔이 종이에 하트를 그리는 모습">
 
+[![CI](https://github.com/yoobinkim541/OSS-2026/actions/workflows/ci.yml/badge.svg)](https://github.com/yoobinkim541/OSS-2026/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/yoobinkim541/OSS-2026)](https://github.com/yoobinkim541/OSS-2026/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 사진을 입력하면 OpenCV로 선 경로를 만들고, WLKATA Mirobot 로봇팔이 벽에 붙인 A4 용지에 펜으로 그리는 오픈소스프로그래밍 텀프로젝트입니다.
 
 ```
@@ -103,6 +107,20 @@ RViz에서 실제 Mirobot 3D 모델로 재생하려면 궤적을 내보낸 뒤 W
 mirobot-sim out/photo.json --export out/photo_traj.json
 wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/c/Users/asus/Desktop/Mirobot && bash sim/run_rviz.sh out/photo_traj.json 10"
 ```
+
+### 배포 (CI/CD)
+
+- **CI** (`.github/workflows/ci.yml`): main push와 PR마다 Windows/Ubuntu × Python 3.11/3.13에서 테스트와 명령줄 도구 동작을 확인합니다.
+- **CD** (`.github/workflows/release.yml`): `v*` 태그를 push하면 Windows .exe를 빌드하고, 빌드된 exe로 동작을 확인한 뒤 GitHub Releases에 zip으로 올립니다.
+- **Dependabot** (`.github/dependabot.yml`): Actions와 의존성 업데이트를 매주 PR로 알려 줍니다.
+
+새 버전 배포:
+
+```bash
+git tag -a v0.2.0 -m "..." && git push origin v0.2.0
+```
+
+`mirobot_sketch/__init__.py`의 `__version__`도 함께 올립니다.
 
 ### 테스트
 
