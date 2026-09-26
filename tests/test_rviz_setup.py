@@ -347,9 +347,9 @@ class ReviewFixTest(unittest.TestCase):
         self.assertFalse(any(c[1] == "--import" for c in w.calls))
 
     def test_release_uploads_are_not_racing(self):
-        import yaml
-        y = yaml.safe_load((ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8"))
-        self.assertEqual(y["jobs"]["wsl-image"].get("needs"), "windows")
+        y = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")   # yaml 모듈 없이
+        job = y[y.index("\n  wsl-image:"):]
+        self.assertIn("\n    needs: windows\n", job[:job.index("runs-on:")])
 
 
 def steps(*states):
