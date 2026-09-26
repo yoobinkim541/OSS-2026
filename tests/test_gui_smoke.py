@@ -64,6 +64,57 @@ class GuiSmokeTest(unittest.TestCase):
         finally:
             app._on_close()
 
+    def test_rviz_setup_window_shows_steps_and_installs(self):
+        from mirobot_sketch import rviz_setup as rs
+        from mirobot_sketch import rviz_setup_window as rsw
+
+        def st(*states):
+            return [rs.SetupStep(i, lab, s, hint="할 일 " + i if s != "ok" else "")
+                    for (i, lab), s in zip((("wsl", "① WSL"), ("env", "② 환경"), ("verify", "③ 확인")), states)]
+
+        fake = mock.Mock()
+        fake.SetupError = rs.SetupError
+        fake.check.return_value = st("ok", "missing", "blocked")
+
+        def install(progress=None, should_cancel=None, **kw):
+            progress("다운로드", 50, 100)
+            return st("ok", "ok", "ok")
+        fake.install.side_effect = install
+        root, app = make_app()
+        try:
+            with mock.patch.object(rsw, "rs", fake):
+                w = app.open_rviz_setup()
+                self.assertTrue(pump(root, app, lambda: w.steps["env"].cget("text").startswith("✕")))
+                self.assertTrue(w.steps["wsl"].cget("text").startswith("✓"))
+                self.assertTrue(w.steps["verify"].cget("text").startswith("○"))
+                self.assertIn("할 일 env", w.todo.cget("text"))
+                self.assertEqual(w.install_btn.cget("text"), "설치")
+                w.install()
+                self.assertTrue(pump(root, app, lambda: w.steps["verify"].cget("text").startswith("✓")))
+                fake.install.assert_called_once()
+                self.assertIn("준비", w.todo.cget("text"))
+                self.assertIs(app.open_rviz_setup(), w)                   # 이미 열려 있으면 그 창
+                # 설치가 도는 동안 [다시 확인]·[설치]·[제거]를 눌러도 두 번째 작업이 시작되지 않아야 함
+                import threading
+                gate = threading.Event()
+                fake.install.side_effect = lambda **kw: (gate.wait(10), st("ok", "ok", "ok"))[1]
+                fake.check.return_value = st("ok", "missing", "blocked")
+                w.busy = False
+                w.install()
+                checks = fake.check.call_count
+                w.refresh()
+                w.install()
+                w.uninstall()
+                root.update()
+                self.assertEqual(fake.check.call_count, checks)
+                self.assertEqual(fake.install.call_count, 2)
+                fake.uninstall.assert_not_called()
+                gate.set()
+                self.assertTrue(pump(root, app, lambda: not w.busy))
+                w.close()
+        finally:
+            app._on_close()
+
     def test_overlay_original_on_auto_cropped_photo(self):
         # 자동 구도로 자른 사진: "원본 겹치기"는 자른 작업 이미지를 겹쳐야 함 (전체 원본이면 크기가 달라 오류)
         import test_face_session as tfs

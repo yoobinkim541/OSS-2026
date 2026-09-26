@@ -37,7 +37,7 @@ agent = ["mcp>=2", "keyring>=25", "requests>=2.31"]
 build = ["pyinstaller>=6.0"]
 
 [project.urls]
-Repository = "https://github.com/yoobinkim541/OSS-2026"
+Repository = "https://github.com/yoobinkim541/OSS-2026-Mirobot-Photo-Sketch"
 
 # 콘솔 없이 창만 뜨는 GUI
 [project.gui-scripts]
@@ -47,6 +47,7 @@ mirobot-sketch = "mirobot_sketch.gui:main"
 mirobot-strokes = "mirobot_sketch.make_strokes:main"
 mirobot-draw = "mirobot_sketch.draw_executor:main"
 mirobot-sim = "mirobot_sketch.mirobot_sim:main"
+mirobot-setup-rviz = "mirobot_sketch.rviz_setup:main"
 
 [tool.setuptools]
 packages = ["mirobot_sketch", "mirobot_sketch.agent"]

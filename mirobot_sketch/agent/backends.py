@@ -75,7 +75,7 @@ class OpenRouterBackend:
         r = requests.post(
             f"{OPENROUTER_URL}/chat/completions", json=body, timeout=300,
             headers={"Authorization": f"Bearer {key}",
-                     "HTTP-Referer": "https://github.com/yoobinkim541/OSS-2026",
+                     "HTTP-Referer": "https://github.com/yoobinkim541/OSS-2026-Mirobot-Photo-Sketch",
                      "X-Title": "Mirobot Sketch"})
         try:
             data = r.json()

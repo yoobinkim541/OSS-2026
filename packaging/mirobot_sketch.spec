@@ -19,6 +19,8 @@ datas += [(str(ROOT / "sim" / "run_rviz.sh"), "sim"), (str(ROOT / "sim" / "rviz_
 # RViz 따라가기가 WSL 파이썬에서 불러 쓰는 모듈 (표준 라이브러리만 씀)
 datas += [(str(ROOT / "mirobot_sketch" / "__init__.py"), "sim/mirobot_sketch"),
           (str(ROOT / "mirobot_sketch" / "live_progress.py"), "sim/mirobot_sketch")]
+# RViz 3D 환경 설치 도우미의 예비 경로(직접 설치)가 WSL에서 실행하는 스크립트
+datas += [(str(ROOT / "packaging" / "wsl" / "setup_ros_env.sh"), "wsl")]
 excludes = ["rembg", "onnxruntime", "torch", "PyQt5", "PyQt6", "PySide6", "IPython", "jupyter", "pytest"]
 
 
