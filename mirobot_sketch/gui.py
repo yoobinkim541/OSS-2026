@@ -375,7 +375,7 @@ class SketchApp:
             if s.color is not None:
                 self.view.show(f"{title} (계산 전)", s.color)
             return
-        overlay = None if self.stage_id in ("source", "paper") else s.color
+        overlay = None if self.stage_id in ("source", "paper") else s.result["color"]   # 구도를 자른 작업 이미지
         if self.stage_id == "edit":
             blank = np.full((*s.result["base"].shape, 3), 255, np.uint8)
             self.view.show(f"{title} (빨강=사라짐 · 초록=생김)", blank, overlay, draw_extra=self._draw_edit)
