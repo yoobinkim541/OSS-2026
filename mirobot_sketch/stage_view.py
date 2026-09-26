@@ -21,13 +21,14 @@ THUMB_H, THUMB_W = 60, 88
 class StageStrip(ctk.CTkScrollableFrame):
     """단계 썸네일 띠. 누르면 on_select(stage_id). 다시 계산될 단계는 글자를 흐리게."""
 
-    def __init__(self, master, stages, on_select, font):
-        super().__init__(master, orientation="horizontal", height=THUMB_H + 44, fg_color="transparent")
+    def __init__(self, master, stages, on_select, font, titles=None):
+        super().__init__(master, orientation="horizontal", height=THUMB_H + 60, fg_color="transparent")
         self.buttons, self._imgs, self.selected = {}, {}, None
+        self.titles = titles or {st.id: st.label for st in stages}
         for i, st in enumerate(stages):
             if i:
                 ctk.CTkLabel(self, text="→", font=font(12), text_color=MUTED).pack(side="left", padx=1)
-            b = ctk.CTkButton(self, text=st.label, compound="top", width=THUMB_W + 12, height=THUMB_H + 34,
+            b = ctk.CTkButton(self, text=self.titles[st.id], compound="top", width=THUMB_W + 34, height=THUMB_H + 50,
                               font=font(11), fg_color="transparent", border_width=2, border_color=BORDER,
                               text_color=TEXT, hover_color=("#e8ecf3", "#2a2f3a"),
                               command=lambda sid=st.id: on_select(sid))
@@ -41,6 +42,12 @@ class StageStrip(ctk.CTkScrollableFrame):
         pil = Image.fromarray(cv2.cvtColor(small, cv2.COLOR_BGR2RGB))
         self._imgs[stage_id] = ctk.CTkImage(pil, size=pil.size)
         self.buttons[stage_id].configure(image=self._imgs[stage_id])
+
+    def set_summaries(self, summaries):
+        """썸네일 아래에 "번호 이름 / 결과 한 줄" (값을 바꾸면 어느 단계 숫자가 바뀌는지 보이게)."""
+        for sid, b in self.buttons.items():
+            line = summaries.get(sid, "")
+            b.configure(text=self.titles[sid] + (f"\n{line}" if line else ""))
 
     def select(self, stage_id):
         self.selected = stage_id
@@ -67,8 +74,16 @@ class BigView(ctk.CTkFrame):
         ctk.CTkSlider(bar, from_=0, to=1, variable=self.alpha, width=110,
                       command=lambda _: self.redraw()).pack(side="right")
         ctk.CTkLabel(bar, text="원본 겹치기", font=font(11)).pack(side="right", padx=4)
+        self.compare_btn = ctk.CTkButton(bar, text="이전 단계와 비교 (누르고 있기)", width=180, height=26,
+                                         font=font(11), fg_color="transparent", border_width=1, text_color=TEXT)
+        self.compare_btn.pack(side="right", padx=(8, 0))
+        self.compare_btn.bind("<ButtonPress-1>", lambda _e: self.hold_compare(True))
+        self.compare_btn.bind("<ButtonRelease-1>", lambda _e: self.hold_compare(False))
         self.options_frame = ctk.CTkFrame(bar, fg_color="transparent", height=28)   # 편집 단계 옵션 자리 (빈 프레임 기본 높이 200px 방지)
         self.options_frame.pack(side="right", padx=8)
+        self.subtitle = ctk.CTkLabel(self, text="", font=font(12), text_color=MUTED, anchor="w", justify="left")
+        self.subtitle.pack(fill="x", padx=10)
+        self._compare, self._held = None, None
         self.fig = Figure(figsize=(8, 6))
         self.ax = self.fig.add_axes([0, 0, 1, 1])
         self.ax.axis("off")
@@ -82,6 +97,23 @@ class BigView(ctk.CTkFrame):
         c.mpl_connect("button_press_event", self._on_press)
         c.mpl_connect("motion_notify_event", self._on_move)
         c.mpl_connect("button_release_event", self._on_release)
+
+    def set_info(self, subtitle, compare=None):
+        """큰 보기 위 설명 줄과 비교 대상. compare = (이전 단계 제목, 그림을 돌려주는 함수) 또는 None."""
+        self.subtitle.configure(text=subtitle)
+        self._compare = compare
+        self.compare_btn.configure(state="normal" if compare else "disabled")
+
+    def hold_compare(self, on):
+        """누르고 있는 동안 이전 단계 그림 (같은 확대 위치), 떼면 원래대로."""
+        if on and self._compare and self._held is None:
+            self._held = (self.title.cget("text"), self.image, self.original, self.draw_extra)
+            title, fn = self._compare
+            self.show(f"{title} (이전 단계)", fn(), self.original)
+        elif not on and self._held is not None:
+            title, img, orig, extra = self._held
+            self._held = None
+            self.show(title, img, orig, extra)
 
     def show(self, title, img_bgr, original_bgr=None, draw_extra=None):
         """같은 크기의 그림이면 확대 위치를 유지."""
