@@ -3,6 +3,7 @@
 #   Windows: python sim/mirobot_sim.py trajectories/orientation-test-F.json --export out/F_traj.json
 #   WSL:     bash sim/run_rviz.sh out/F_traj.json [배속=10]
 #   (GUI의 "RViz 3D로 보기" 버튼이 이 스크립트를 WSL에서 대신 실행함)
+#   세 번째 인자로 진행 파일을 주면 로봇 진행을 따라감: bash sim/run_rviz.sh traj.json 1 out/live_progress.json
 set -e
 TRAJ="${1:?관절 궤적 JSON 경로가 필요합니다}"
 SPEED="${2:-10}"
@@ -23,7 +24,14 @@ if [ "${MIROBOT_RVIZ_GPU:-0}" != "1" ]; then export LIBGL_ALWAYS_SOFTWARE=1; fi
 rviz2 -d "$HERE/rviz/mirobot_sketch.rviz" > /tmp/mirobot_rviz.log 2>&1 &
 RVIZ=$!
 sleep 2
-python3 "$HERE/rviz_playback.py" "$TRAJ" --speed "$SPEED" --loop &
+FOLLOW="${3:-}"
+# rviz_playback.py가 mirobot_sketch.live_progress를 불러 쓰도록 (저장소: 상위 폴더, 설치판: sim/mirobot_sketch 복사본)
+export PYTHONPATH="$HERE:$HERE/..${PYTHONPATH:+:$PYTHONPATH}"
+if [ -n "$FOLLOW" ]; then
+  python3 "$HERE/rviz_playback.py" "$TRAJ" --follow "$FOLLOW" &
+else
+  python3 "$HERE/rviz_playback.py" "$TRAJ" --speed "$SPEED" --loop &
+fi
 PLAY=$!
 trap 'kill $RSP $RVIZ $PLAY 2>/dev/null' EXIT
 # RViz 창을 닫으면 재생·상태 발행도 함께 종료
