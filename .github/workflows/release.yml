@@ -56,6 +56,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { Write-Error "가상 시뮬레이션 실행 실패 (exit $LASTEXITCODE)"; exit 1 }
           # RViz 따라가기가 WSL에서 불러 쓰는 모듈이 설치판에 들어갔는지
           if (-not (Test-Path dist\MirobotSketch\_internal\sim\mirobot_sketch\live_progress.py)) { Write-Error "sim/mirobot_sketch/live_progress.py 없음"; exit 1 }
+          # 설치 도우미의 예비 경로(직접 설치) 스크립트와 얼굴 검출 모델
+          if (-not (Test-Path dist\MirobotSketch\_internal\wsl\setup_ros_env.sh)) { Write-Error "wsl/setup_ros_env.sh 없음"; exit 1 }
+          if (-not (Test-Path dist\MirobotSketch\_internal\mirobot_sketch\data\face_detection_yunet_2023mar.onnx)) { Write-Error "얼굴 검출 모델 없음"; exit 1 }
+          dist\MirobotSketch\mirobot.exe setup-rviz --help
+          if ($LASTEXITCODE -ne 0) { Write-Error "setup-rviz 명령 실패"; exit 1 }
 
       - name: 설치 프로그램 빌드 (Inno Setup)
         run: |
@@ -100,3 +105,50 @@ jobs:
             ${{ env.SETUP }}
             ${{ env.ZIP }}
           generate_release_notes: true
+
+  # RViz 3D 환경 이미지: ubuntu:22.04 컨테이너에서 설치 스크립트(--image)를 돌려 WSL로 가져올 수 있는 루트 파일로 내보냄
+  # (앱의 설치 도우미가 이 파일을 받아 `wsl --import MirobotSketch-ROS`로 설치)
+  wsl-image:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: 버전 확인 (태그 = __version__)
+        run: |
+          VER=$(python3 -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('mirobot_sketch/__init__.py', encoding='utf-8').read()).group(1))")
+          if [ "${{ github.ref_type }}" = "tag" ] && [ "${{ github.ref_name }}" != "v$VER" ]; then
+            echo "태그 ${{ github.ref_name }}와 코드 버전 v$VER가 다릅니다"; exit 1
+          fi
+          echo "IMG=MirobotSketch-ROS-humble-$VER.tar.gz" >> "$GITHUB_ENV"
+      - name: 이미지 만들기 (setup_ros_env.sh --image)
+        run: |
+          docker run --name rosimg -v "$PWD:/work:ro" ubuntu:22.04 bash /work/packaging/wsl/setup_ros_env.sh --image | tee setup.log
+          grep -qx SETUP_OK setup.log
+      - name: 이미지 안에서 확인 (사용자 mirobot으로 ROS·모델·robot_state_publisher)
+        run: |
+          docker commit rosimg mirobot-ros:check
+          docker run --rm -u mirobot mirobot-ros:check bash -lc 'source /opt/ros/humble/setup.bash && source ~/mirobot_ws/install/setup.bash && ros2 pkg prefix wlkata_mirobot_description && ls /opt/ros/humble/lib/robot_state_publisher/robot_state_publisher'
+          docker run --rm mirobot-ros:check cat /etc/wsl.conf
+      - name: 내보내기 · 압축 · SHA256 · 크기 검사 (1900MB 이하, GitHub 릴리스 파일 한도 2GB)
+        run: |
+          docker export rosimg | gzip -9 > "$IMG"
+          sha256sum "$IMG" | tee "$IMG.sha256"
+          SIZE=$(stat -c %s "$IMG")
+          echo "이미지 크기: $((SIZE / 1024 / 1024)) MB"
+          if [ "$SIZE" -gt $((1900 * 1024 * 1024)) ]; then echo "이미지가 1900MB를 넘습니다"; exit 1; fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: MirobotSketch-ROS-image
+          path: |
+            ${{ env.IMG }}
+            ${{ env.IMG }}.sha256
+          retention-days: 3
+      - name: GitHub Release에 올리기
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            ${{ env.IMG }}
+            ${{ env.IMG }}.sha256

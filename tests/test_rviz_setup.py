@@ -242,6 +242,30 @@ def steps(*states):
     return [rs.SetupStep(i, i, s, hint="hint-" + i if s != "ok" else "") for i, s in zip(ids, states)]
 
 
+class PackagingTest(unittest.TestCase):
+    def test_release_builds_wsl_image(self):
+        y = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        for needle in ("wsl-image:", "ubuntu:22.04", "setup_ros_env.sh --image", "SETUP_OK",
+                       "ros2 pkg prefix wlkata_mirobot_description", "robot_state_publisher",
+                       "docker export", "gzip", "sha256sum", "MirobotSketch-ROS-humble-", "1900",
+                       "_internal\\wsl\\setup_ros_env.sh"):
+            self.assertIn(needle, y, needle)
+
+    def test_installer_offers_rviz_env_and_cleans_up(self):
+        iss = (ROOT / "packaging" / "installer.iss").read_text(encoding="utf-8-sig")
+        for needle in ('Name: "rvizenv"', "--setup-rviz", "Tasks: rvizenv", "--unregister MirobotSketch-ROS",
+                       "CurUninstallStepChanged", "SuppressibleMsgBox", "IDNO"):
+            self.assertIn(needle, iss, needle)
+        self.assertNotIn("OSS-2026\n", iss)
+
+    def test_exe_bundles_setup_script(self):
+        spec = (ROOT / "packaging" / "mirobot_sketch.spec").read_text(encoding="utf-8")
+        self.assertIn('"wsl" / "setup_ros_env.sh"), "wsl")', spec)
+        with mock.patch.object(rs.paths, "repo_root", lambda: None), \
+                mock.patch.object(rs.sys, "_MEIPASS", "C:/app/_internal", create=True):
+            self.assertEqual(rs.script_path(), Path("C:/app/_internal/wsl/setup_ros_env.sh"))
+
+
 class CliTest(unittest.TestCase):
     def test_check_exit_code(self):
         with mock.patch.object(rs, "check", return_value=steps("ok", "ok", "ok")):
