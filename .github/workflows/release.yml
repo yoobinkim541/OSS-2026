@@ -109,6 +109,8 @@ jobs:
   # RViz 3D 환경 이미지: ubuntu:22.04 컨테이너에서 설치 스크립트(--image)를 돌려 WSL로 가져올 수 있는 루트 파일로 내보냄
   # (앱의 설치 도우미가 이 파일을 받아 `wsl --import MirobotSketch-ROS`로 설치)
   wsl-image:
+    # windows 작업이 릴리스를 먼저 만든 뒤 올림 (두 작업이 같은 릴리스를 동시에 만들면 충돌)
+    needs: windows
     runs-on: ubuntu-latest
     defaults:
       run:

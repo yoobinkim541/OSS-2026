@@ -5,12 +5,13 @@ RViz 3D 환경 설치 도우미 (WSL2 + ROS 2 Humble + WLKATA Mirobot 모델)
   ① WSL 기능      — 없으면 관리자 창에서 `wsl --install --no-distribution` (사용자가 승인 후 재부팅)
   ② RViz 환경     — 릴리스의 미리 만든 이미지를 받아(이어받기) SHA256 확인 → 압축 풀기 → `wsl --import`
   ③ 동작 확인     — ROS·모델 패키지와 WSLg 화면 소켓 확인
-예비 경로: `Ubuntu-22.04` 배포판에서 packaging/wsl/setup_ros_env.sh를 새 콘솔로 실행(sudo 비밀번호는 사용자가 입력).
+예비 경로: Ubuntu 공식 22.04 WSL 루트 파일을 전용 배포판으로 가져와 그 안에서 packaging/wsl/setup_ros_env.sh 실행.
 비밀번호는 받지도 저장하지도 않습니다. 사용자의 기존 배포판은 건드리지 않습니다.
 """
 
 import fnmatch
 import gzip
+import errno
 import hashlib
 import os
 import shutil
@@ -26,8 +27,11 @@ from .rviz_launch import ROS_CHECK, _no_window, list_distros, to_wsl_path
 DISTRO = "MirobotSketch-ROS"
 IMAGE_NAME = "MirobotSketch-ROS-humble-{version}.tar.gz"
 REPO = "yoobinkim541/OSS-2026-Mirobot-Photo-Sketch"
-MIN_FREE_BYTES = 5 * 2**30
-MANUAL_DISTRO = "Ubuntu-22.04"
+MIN_FREE_BYTES = 5 * 2**30               # 가져오기 직전에 필요한 여유 공간
+PRE_DOWNLOAD_FREE_BYTES = 8 * 2**30      # 받기 전: 압축 파일 + 풀린 tar + 배포판 디스크
+# 예비 경로: Ubuntu 공식 WSL 루트 파일을 전용 배포판으로 가져와 그 안에서 설치 스크립트를 실행
+UBUNTU_ROOTFS_DIR = "https://cloud-images.ubuntu.com/wsl/releases/jammy/current/"
+UBUNTU_ROOTFS_NAME = "ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz"
 VERIFY_CMD = ("source /opt/ros/humble/setup.bash && source ~/mirobot_ws/install/setup.bash"
               " && ros2 pkg prefix wlkata_mirobot_description >/dev/null && test -S /tmp/.X11-unix/X0")
 CHUNK = 1 << 20
@@ -178,18 +182,55 @@ def gunzip(src, dst, progress=None, should_cancel=None):
                 out.write(b)
                 if progress:
                     progress(raw.tell(), total)
-    except (OSError, EOFError, zlib.error) as e:
+    except OSError as e:
+        Path(dst).unlink(missing_ok=True)
+        if e.errno == errno.ENOSPC:              # 디스크가 가득 참: 파일은 멀쩡하므로 "손상"이라고 하지 않음
+            raise SetupError("env", "디스크 공간이 부족해 압축을 풀지 못했습니다.",
+                             f"{install_dir().drive or install_dir()} 드라이브의 공간을 비운 뒤 [이어서 설치]를 누르세요."
+                             ) from e
+        raise SetupError("env", f"이미지 파일이 손상되었습니다: {e}", "[설치]를 다시 누르면 새로 받습니다.") from e
+    except (EOFError, zlib.error) as e:
         Path(dst).unlink(missing_ok=True)
         raise SetupError("env", f"이미지 파일이 손상되었습니다: {e}", "[설치]를 다시 누르면 새로 받습니다.") from e
 
 
-def import_distro(tar_path, name=DISTRO, run=subprocess.run):
+def _check_space(need, when):
     base = install_dir()
     base.mkdir(parents=True, exist_ok=True)
     free = shutil.disk_usage(base).free
-    if free < MIN_FREE_BYTES:
-        raise SetupError("env", f"디스크 공간이 부족합니다 (남은 공간 {free / 2**30:.1f}GB, 5GB 필요).",
+    if free < need:
+        raise SetupError("env", f"디스크 공간이 부족합니다 (남은 공간 {free / 2**30:.1f}GB, {when} {need / 2**30:.0f}GB 필요).",
                          f"{base.drive or base} 드라이브의 공간을 비운 뒤 다시 시도하세요.")
+
+
+def _fetch_verified(url, sha_text, dest, progress, should_cancel, get):
+    """SHA256이 맞는 파일 (이미 받아 둔 파일이 맞으면 다시 받지 않음). 틀리면 지우고 SetupError."""
+    dest = Path(dest)
+    if dest.exists() and verify_sha256(dest, sha_text):
+        return dest
+    gz = download(url, dest, progress, should_cancel, get)
+    if not verify_sha256(gz, sha_text):
+        gz.unlink(missing_ok=True)
+        raise SetupError("env", "받은 파일의 SHA256이 맞지 않습니다.",
+                         "[설치]를 다시 누르면 새로 받습니다. 계속되면 [직접 설치(예비)]를 쓰세요.")
+    return gz
+
+
+def _unpack_and_import(gz, name, run, progress, should_cancel):
+    report = (lambda stage: (lambda d, t: progress(stage, d, t))) if progress else (lambda stage: None)
+    tar = Path(str(gz)[:-3]) if str(gz).endswith(".gz") else Path(str(gz) + ".tar")
+    try:
+        gunzip(gz, tar, report("압축 풀기"), should_cancel)
+        if progress:
+            progress("가져오기", 0, 0)
+        import_distro(tar, name, run)
+    finally:
+        tar.unlink(missing_ok=True)
+
+
+def import_distro(tar_path, name=DISTRO, run=subprocess.run):
+    _check_space(MIN_FREE_BYTES, "가져오기에")
+    base = install_dir()
     r = _wsl(run, "--import", name, str(base / name), str(tar_path), "--version", "2", timeout=1800)
     if r.returncode != 0:
         out = (r.stdout or b"").replace(b"\x00", b"").decode(errors="ignore").strip()
@@ -204,33 +245,23 @@ def install(progress=None, should_cancel=None, run=subprocess.run, get=None, ver
         raise SetupError("wsl", "WSL 기능이 없습니다.", WSL_HINT)
     if steps[1].ok:
         return steps
-    base = install_dir()
-    base.mkdir(parents=True, exist_ok=True)
-    report = (lambda stage: (lambda d, t: progress(stage, d, t))) if progress else (lambda stage: None)
-    tar = base / (IMAGE_NAME.format(version=version)[:-3])
+    if name in list_distros(run):          # 등록은 됐는데 ROS 확인 실패: 다시 가져오면 "이미 있음"으로 실패함
+        raise SetupError("env", f"{name} 배포판이 있지만 ROS·모델 확인에 실패했습니다.",
+                         "[다시 확인]을 눌러 보고, 계속되면 [직접 설치(예비)]로 이어서 설치하거나 [제거] 후 [설치]하세요.")
     if image is not None:
-        gz = Path(image)
-    else:
-        get = get or _requests_get()
-        url, sha_url = image_urls(version, get)
-        try:
-            sha = get(sha_url, timeout=30).text
-        except Exception as e:
-            raise SetupError("env", f"SHA256 파일을 받지 못했습니다: {e}", "인터넷 연결을 확인하세요.") from e
-        gz = download(url, base / IMAGE_NAME.format(version=version), report("다운로드"), should_cancel, get)
-        if not verify_sha256(gz, sha):
-            gz.unlink(missing_ok=True)
-            raise SetupError("env", "받은 이미지의 SHA256이 맞지 않습니다.",
-                             "[설치]를 다시 누르면 새로 받습니다. 계속되면 [직접 설치(예비)]를 쓰세요.")
+        _unpack_and_import(Path(image), name, run, progress, should_cancel)
+        return check(run, name)
+    _check_space(PRE_DOWNLOAD_FREE_BYTES, "설치에")
+    get = get or _requests_get()
+    url, sha_url = image_urls(version, get)
     try:
-        gunzip(gz, tar, report("압축 풀기"), should_cancel)
-        if progress:
-            progress("가져오기", 0, 0)
-        import_distro(tar, name, run)
-    finally:
-        tar.unlink(missing_ok=True)
-    if image is None:
-        gz.unlink(missing_ok=True)
+        sha = get(sha_url, timeout=30).text
+    except Exception as e:
+        raise SetupError("env", f"SHA256 파일을 받지 못했습니다: {e}", "인터넷 연결을 확인하세요.") from e
+    report = (lambda d, t: progress("다운로드", d, t)) if progress else None
+    gz = _fetch_verified(url, sha, install_dir() / IMAGE_NAME.format(version=version), report, should_cancel, get)
+    _unpack_and_import(gz, name, run, progress, should_cancel)
+    gz.unlink(missing_ok=True)
     return check(run, name)
 
 
@@ -241,12 +272,31 @@ def install_wsl_feature(popen=subprocess.Popen):
                  creationflags=_no_window())
 
 
-def manual_install(run=subprocess.run, popen=subprocess.Popen):
-    """예비 경로: 새 콘솔에서 Ubuntu-22.04 만들기(계정은 사용자가 만듦) 또는 그 안에서 설치 스크립트 실행."""
+def manual_install(progress=None, should_cancel=None, run=subprocess.run, get=None, popen=subprocess.Popen):
+    """예비 경로 (미리 만든 이미지를 받을 수 없을 때): Ubuntu 공식 22.04 WSL 루트 파일을 전용 배포판 DISTRO로
+    가져온 뒤, 새 콘솔에서 그 안의 root로 설치 스크립트(--image)를 실행. 이미 있으면 스크립트만 다시 실행
+    (끝난 단계는 건너뜀). 사용자의 기존 배포판은 건드리지 않고, 비밀번호·추가 관리자 승인이 없음."""
+    if not check(run, DISTRO)[0].ok:
+        raise SetupError("wsl", "WSL 기능이 없습니다.", WSL_HINT)
+    if DISTRO not in list_distros(run):
+        _check_space(PRE_DOWNLOAD_FREE_BYTES, "설치에")
+        get = get or _requests_get()
+        try:
+            sums = get(UBUNTU_ROOTFS_DIR + "SHA256SUMS", timeout=30).text
+        except Exception as e:
+            raise SetupError("env", f"Ubuntu 체크섬을 받지 못했습니다: {e}", "인터넷 연결을 확인하세요.") from e
+        sha = next((ln.split()[0] for ln in sums.splitlines()
+                    if ln.split() and ln.split()[-1].lstrip("*") == UBUNTU_ROOTFS_NAME), None)
+        if sha is None:
+            raise SetupError("env", "Ubuntu 루트 파일 체크섬을 찾지 못했습니다.", "잠시 뒤 다시 시도하세요.")
+        report = (lambda d, t: progress("Ubuntu 22.04 받기", d, t)) if progress else None
+        gz = _fetch_verified(UBUNTU_ROOTFS_DIR + UBUNTU_ROOTFS_NAME, sha, install_dir() / UBUNTU_ROOTFS_NAME,
+                             report, should_cancel, get)
+        _unpack_and_import(gz, DISTRO, run, progress, should_cancel)
+        gz.unlink(missing_ok=True)
     flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-    if MANUAL_DISTRO not in list_distros(run):
-        return popen(["wsl.exe", "--install", "-d", MANUAL_DISTRO], creationflags=flags)
-    return popen(["wsl.exe", "-d", MANUAL_DISTRO, "--", "bash", to_wsl_path(script_path())], creationflags=flags)
+    return popen(["wsl.exe", "-d", DISTRO, "-u", "root", "--", "bash", to_wsl_path(script_path()), "--image"],
+                 creationflags=flags)
 
 
 def uninstall(run=subprocess.run, name=DISTRO):
@@ -277,6 +327,27 @@ def _print_steps(steps):
     print("RViz 3D 환경 준비 완료" if todo is None else f"할 일: {todo.hint}")
 
 
+def _progress_printer():
+    """단계마다 5% 단위로 한 줄씩 출력하는 progress(stage, done, total)."""
+    last = {}
+
+    def progress(stage, done, total):
+        pct = int(100 * done / total) if total else 0
+        if last.get(stage) != pct // 5:
+            last[stage] = pct // 5
+            print(f"{stage} {pct}%" if total else stage, flush=True)
+    return progress
+
+
+def _print_error(e):
+    log(f"실패 ({e.step}): {e.message}")
+    print(f"실패: {e.message}")
+    if e.hint:
+        print(e.hint)
+    if e.step == "wsl":
+        print("WSL 기능 설치: mirobot setup-rviz --wsl")
+
+
 def main(argv=None):
     """mirobot setup-rviz --check | --install | --uninstall | --manual | --wsl"""
     paths.safe_console()
@@ -286,27 +357,16 @@ def main(argv=None):
     g.add_argument("--check", action="store_true", help="상태 확인 (준비되면 종료 코드 0)")
     g.add_argument("--install", action="store_true", help="RViz 환경 이미지를 받아 설치 (이어받기)")
     g.add_argument("--uninstall", action="store_true", help=f"{DISTRO} 배포판 제거")
-    g.add_argument("--manual", action="store_true", help="예비: Ubuntu-22.04에서 설치 스크립트 실행 (새 콘솔)")
+    g.add_argument("--manual", action="store_true",
+                   help="예비: Ubuntu 공식 루트 파일로 전용 배포판을 만들고 설치 스크립트 실행 (새 콘솔)")
     g.add_argument("--wsl", action="store_true", help="WSL 기능 설치 (관리자 승인 창, 끝나면 재부팅)")
     a = ap.parse_args(argv)
     if a.install:
-        last = {}
-
-        def progress(stage, done, total):
-            pct = int(100 * done / total) if total else 0
-            if last.get(stage) != pct // 5:
-                last[stage] = pct // 5
-                print(f"{stage} {pct}%" if total else stage, flush=True)
         try:
             log("설치 시작")
-            steps = install(progress=progress)
+            steps = install(progress=_progress_printer())
         except SetupError as e:
-            log(f"설치 실패 ({e.step}): {e.message}")
-            print(f"실패: {e.message}")
-            if e.hint:
-                print(e.hint)
-            if e.step == "wsl":
-                print("WSL 기능 설치: mirobot setup-rviz --wsl")
+            _print_error(e)
             return 1
         log("설치 끝: " + ", ".join(f"{s.id}={s.state}" for s in steps))
         _print_steps(steps)
@@ -316,8 +376,14 @@ def main(argv=None):
         log("제거")
         return 0
     if a.manual:
-        manual_install()
-        print("새 콘솔에서 진행합니다. sudo 비밀번호는 그 콘솔에 직접 입력하세요.")
+        try:
+            log("직접 설치 시작")
+            manual_install(progress=_progress_printer())
+        except SetupError as e:
+            _print_error(e)
+            return 1
+        print("새 콘솔에서 설치 스크립트가 진행됩니다(약 10분). 끝나면 mirobot setup-rviz --check로 확인하세요.")
+        log("직접 설치: 스크립트 실행")
         return 0
     if a.wsl:
         install_wsl_feature()

@@ -46,6 +46,11 @@ class RvizLaunchTest(unittest.TestCase):
             self.assertEqual(rl.find_ros_distro(run), "MirobotSketch-ROS")
         self.assertIn("setup-rviz", rl.SETUP_HINT)
 
+    def test_missing_distro_is_not_cached(self):
+        # 설치 도우미로 설치한 뒤 앱을 다시 켜지 않아도 RViz를 찾아야 함
+        self.assertIsNone(rl.find_ros_distro(fake_run(None)))
+        self.assertEqual(rl.find_ros_distro(fake_run("Ubuntu-22.04")), "Ubuntu-22.04")
+
     def test_no_ros_distro_explains_setup(self):
         popen = mock.Mock()
         with mock.patch.object(rl.sys, "platform", "win32"), mock.patch.object(rl, "_no_window", lambda: 0):

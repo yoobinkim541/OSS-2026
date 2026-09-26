@@ -82,7 +82,8 @@ def find_ros_distro(run=subprocess.run):
         if r.returncode == 0:
             found = d
             break
-    _distro_cache["name"] = found
+    if found:          # 못 찾은 결과는 기억하지 않음 (설치 도우미로 설치하면 앱을 다시 켜지 않아도 찾게)
+        _distro_cache["name"] = found
     return found
 
 

@@ -222,20 +222,134 @@ class UrlAndCommandsTest(unittest.TestCase):
 
         self.assertEqual(rs.image_urls("0.5.0", get=get_api), ("U", "S"))
 
-    def test_admin_and_manual_commands(self):
+    def test_admin_command(self):
         popen = mock.Mock()
         rs.install_wsl_feature(popen=popen)
         cmd = " ".join(popen.call_args.args[0])
         self.assertIn("--no-distribution", cmd)
         self.assertIn("RunAs", cmd)
-        popen.reset_mock()
-        rs.manual_install(run=FakeWsl(distros=["Ubuntu"]), popen=popen)       # 22.04 없음 -> 배포판부터
-        self.assertIn("Ubuntu-22.04", popen.call_args.args[0])
-        self.assertIn("--install", popen.call_args.args[0])
-        popen.reset_mock()
-        rs.manual_install(run=FakeWsl(distros=["Ubuntu-22.04"]), popen=popen)
-        self.assertTrue(popen.call_args.args[0][-1].endswith("setup_ros_env.sh"))
         self.assertTrue(rs.script_path().exists())
+
+
+class ManualInstallTest(unittest.TestCase):
+    """예비 경로: 공식 Ubuntu 22.04 WSL 루트 파일을 전용 배포판으로 가져와 그 안에서 스크립트 실행.
+    사용자의 기존 배포판(Ubuntu-22.04 등)은 건드리지 않고, 비밀번호·추가 관리자 승인이 없음."""
+
+    def rootfs_get(self, d):
+        gz = Path(d) / "rootfs.tar.gz"
+        with gzip.open(gz, "wb") as g:
+            g.write(b"ubuntu" * 50)
+        sha = hashlib.sha256(gz.read_bytes()).hexdigest()
+        urls = []
+
+        def get(url, headers=None, **kw):
+            urls.append(url)
+            if url.endswith("SHA256SUMS"):
+                return FakeResp(200, f"0000  other.tar.gz\n{sha}  {rs.UBUNTU_ROOTFS_NAME}\n".encode())
+            return FakeResp(200, gz.read_bytes())
+        return get, urls
+
+    def test_new_distro_from_official_rootfs(self):
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(rs, "install_dir", lambda: Path(d) / "wsl"), \
+                mock.patch.object(rs.shutil, "disk_usage", lambda p: mock.Mock(free=100 * 2**30)):
+            get, urls = self.rootfs_get(d)
+            w, popen = FakeWsl(distros=["Ubuntu-22.04"]), mock.Mock()
+            rs.manual_install(run=w, get=get, popen=popen)
+            self.assertTrue(any(u.startswith("https://cloud-images.ubuntu.com/wsl/") for u in urls))
+            imp = next(c for c in w.calls if c[1] == "--import")
+            self.assertEqual(imp[2], rs.DISTRO)
+            cmd = popen.call_args.args[0]
+            self.assertEqual(cmd[:5], ["wsl.exe", "-d", rs.DISTRO, "-u", "root"])
+            self.assertTrue(cmd[-2].endswith("setup_ros_env.sh"))
+            self.assertEqual(cmd[-1], "--image")
+            everything = " ".join(" ".join(c) for c in w.calls + [cmd])
+            self.assertNotIn("Ubuntu-22.04", everything.replace(rs.UBUNTU_ROOTFS_NAME, ""))   # 기존 배포판 안 건드림
+            self.assertNotIn("--install", everything)
+            self.assertFalse(list((Path(d) / "wsl").glob("*.tar*")))
+
+    def test_existing_distro_just_reruns_script(self):
+        w, popen, get = FakeWsl(distros=[rs.DISTRO]), mock.Mock(), mock.Mock()
+        rs.manual_install(run=w, get=get, popen=popen)
+        get.assert_not_called()
+        self.assertFalse(any(c[1] == "--import" for c in w.calls))
+        self.assertEqual(popen.call_args.args[0][-1], "--image")
+
+    def test_needs_wsl_and_rejects_bad_checksum(self):
+        with self.assertRaises(rs.SetupError) as cm:
+            rs.manual_install(run=FakeWsl(wsl=False), get=mock.Mock(), popen=mock.Mock())
+        self.assertEqual(cm.exception.step, "wsl")
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(rs, "install_dir", lambda: Path(d) / "wsl"), \
+                mock.patch.object(rs.shutil, "disk_usage", lambda p: mock.Mock(free=100 * 2**30)):
+            def get(url, headers=None, **kw):
+                if url.endswith("SHA256SUMS"):
+                    return FakeResp(200, f"{'0' * 64}  {rs.UBUNTU_ROOTFS_NAME}\n".encode())
+                return FakeResp(200, b"x" * 100)
+            with self.assertRaises(rs.SetupError) as cm:
+                rs.manual_install(run=FakeWsl(), get=get, popen=mock.Mock())
+            self.assertIn("SHA256", cm.exception.message)
+
+
+class ReviewFixTest(unittest.TestCase):
+    def test_disk_space_checked_before_download(self):
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(rs, "install_dir", lambda: Path(d) / "wsl"), \
+                mock.patch.object(rs.shutil, "disk_usage", lambda p: mock.Mock(free=3 * 2**30)):
+            get = mock.Mock()
+            with self.assertRaises(rs.SetupError) as cm:
+                rs.install(run=FakeWsl(), get=get, version="9.9.9")
+            self.assertIn("공간", cm.exception.message)
+            get.assert_not_called()
+
+    def test_disk_full_while_unpacking_is_not_called_corrupt(self):
+        import errno
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "a.gz"
+            with gzip.open(src, "wb") as g:
+                g.write(b"x" * 1000)
+            real_open = open
+
+            def full_open(path, mode="r", *a, **k):
+                f = real_open(path, mode, *a, **k)
+                if "w" in mode:
+                    def write(b):
+                        raise OSError(errno.ENOSPC, "No space left on device")
+                    f.write = write
+                return f
+            with mock.patch("builtins.open", full_open), self.assertRaises(rs.SetupError) as cm:
+                rs.gunzip(src, Path(d) / "a.tar")
+            self.assertIn("공간", cm.exception.message)
+            self.assertNotIn("손상", cm.exception.message)
+
+    def test_verified_download_is_reused(self):
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(rs, "install_dir", lambda: Path(d) / "wsl"), \
+                mock.patch.object(rs.shutil, "disk_usage", lambda p: mock.Mock(free=100 * 2**30)):
+            gz, sha = InstallTest().make_image(d)
+            dest = Path(d) / "wsl" / rs.IMAGE_NAME.format(version="9.9.9")
+            dest.parent.mkdir(parents=True)
+            dest.write_bytes(gz.read_bytes())                  # 지난번에 받아 둔 파일 (가져오기에서 실패했던 경우)
+            urls = []
+
+            def get(url, headers=None, **kw):
+                urls.append(url)
+                return FakeResp(200, f"{sha}  x\n".encode()) if url.endswith(".sha256") else FakeResp(500)
+            steps = rs.install(run=FakeWsl(), get=get, version="9.9.9")
+            self.assertEqual([s.state for s in steps], ["ok", "ok", "ok"])
+            self.assertFalse(any(u.endswith(".tar.gz") for u in urls))
+
+    def test_registered_but_broken_distro_is_not_imported_again(self):
+        w = FakeWsl(distros=[rs.DISTRO])                       # 등록은 됐지만 ROS 확인 실패
+        with self.assertRaises(rs.SetupError) as cm:
+            rs.install(run=w, get=mock.Mock(), version="9.9.9")
+        self.assertIn("제거", cm.exception.hint)
+        self.assertFalse(any(c[1] == "--import" for c in w.calls))
+
+    def test_release_uploads_are_not_racing(self):
+        import yaml
+        y = yaml.safe_load((ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8"))
+        self.assertEqual(y["jobs"]["wsl-image"].get("needs"), "windows")
 
 
 def steps(*states):

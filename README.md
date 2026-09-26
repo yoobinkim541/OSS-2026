@@ -143,7 +143,7 @@ RViz 3D 보기와 실시간 따라가기는 WSL2에 ROS 2 Humble과 WLKATA Mirob
 - **명령줄:** `mirobot setup-rviz --check | --install | --uninstall | --manual | --wsl`
 - **설치 프로그램:** "RViz 3D 환경도 설치"를 체크하면 설치 후 도우미가 열립니다. 앱을 지울 때 배포판도 지울지 묻습니다.
 - **WSL이 없는 PC:** [WSL 설치(관리자)] → Windows 승인 → 재부팅 → [설치]. 관리자 권한은 이 한 번뿐이고 비밀번호는 받지 않습니다.
-- **예비 경로:** 이미지를 받을 수 없으면 [직접 설치(예비)]로 `Ubuntu-22.04`에서 `packaging/wsl/setup_ros_env.sh`를 실행합니다(sudo 비밀번호는 사용자가 콘솔에 직접 입력).
+- **예비 경로:** 이미지를 받을 수 없으면 [직접 설치(예비)]: Ubuntu 공식 22.04 WSL 루트 파일(약 230MB, SHA256 확인)을 받아 전용 배포판 `MirobotSketch-ROS`로 가져온 뒤, 새 콘솔에서 그 안의 root로 `packaging/wsl/setup_ros_env.sh --image`를 실행합니다. 이미 있으면 스크립트만 다시 실행합니다(끝난 단계는 건너뜀). 사용자의 기존 배포판은 건드리지 않고, 비밀번호·추가 관리자 승인이 없습니다.
 - 기존 WSL 배포판은 건드리지 않습니다. 다른 배포판을 쓰려면 환경 변수 `MIROBOT_WSL_DISTRO`.
 
 손으로 재생하려면 궤적을 내보낸 뒤 WSL2에서 실행합니다.

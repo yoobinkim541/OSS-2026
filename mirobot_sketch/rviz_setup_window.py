@@ -12,7 +12,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from . import paths
+from . import paths, rviz_launch
 from . import rviz_setup as rs
 
 OK_C, BAD_C, IDLE_C, ACT_C = "#16a34a", "#dc2626", ("#9aa3b2", "#6b7280"), ("#2563eb", "#3b82f6")
@@ -96,6 +96,8 @@ class RvizSetupWindow(ctk.CTkToplevel):
             started = False
         self.install_btn.configure(text="이어서 설치" if started else "설치",
                                    state="disabled" if (self.busy or todo is None or wsl_missing) else "normal")
+        # 예비 경로도 WSL 기능이 있어야 함 (없을 때 누르면 관리자 승인이 한 번 더 뜨는 경로를 막음)
+        self.manual_btn.configure(state="disabled" if (self.busy or wsl_missing) else "normal")
 
     def _progress(self, stage, done, total):
         if not self._alive():
@@ -135,12 +137,15 @@ class RvizSetupWindow(ctk.CTkToplevel):
 
     def _done(self, steps):
         self.busy = False
+        rviz_launch._distro_cache.clear()     # 설치·제거 뒤 'RViz 3D로 보기'가 새 배포판을 다시 찾게
         if self._alive():
             self.bar.stop()
             self.bar.configure(mode="determinate")
             self._show(steps)
 
     def refresh(self):
+        if self.busy:                          # 설치·제거가 도는 중에는 확인하지 않음 (버튼이 다시 켜지지 않게)
+            return
         self.busy = True
         self._work(rs.check)
 
@@ -161,11 +166,22 @@ class RvizSetupWindow(ctk.CTkToplevel):
             rs.log("WSL 기능 설치 요청")
 
     def manual(self):
-        if messagebox.askokcancel("직접 설치(예비)", "새 콘솔 창에서 Ubuntu 22.04에 ROS 2와 Mirobot 모델을 설치합니다.\n"
-                                                    "sudo 비밀번호는 그 콘솔에 직접 입력하세요. 끝나면 [다시 확인]을 누르세요.",
-                                  parent=self):
-            rs.manual_install()
-            rs.log("직접 설치 시작")
+        if self.busy:
+            return
+        if not messagebox.askokcancel(
+                "직접 설치(예비)", f"Ubuntu 공식 22.04 루트 파일(약 230MB)을 받아 전용 배포판 {rs.DISTRO}를 만들고,\n"
+                                "새 콘솔에서 ROS 2와 Mirobot 모델을 설치합니다(약 10분, 비밀번호 필요 없음).\n"
+                                "기존 WSL 배포판은 건드리지 않습니다. 콘솔이 끝나면 [다시 확인]을 누르세요.", parent=self):
+            return
+        self.busy, self.cancel = True, False
+        self.todo.configure(text="직접 설치 준비 중... (Ubuntu 22.04 받기 → 가져오기 → 새 콘솔에서 설치)")
+        rs.log("직접 설치 시작 (GUI)")
+
+        def work():
+            rs.manual_install(progress=lambda st, d, t: self.app.ui(self._progress, st, d, t),
+                              should_cancel=lambda: self.cancel)
+            return rs.check()
+        self._work(work)
 
     def uninstall(self):
         if self.busy:

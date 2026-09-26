@@ -94,6 +94,23 @@ class GuiSmokeTest(unittest.TestCase):
                 fake.install.assert_called_once()
                 self.assertIn("준비", w.todo.cget("text"))
                 self.assertIs(app.open_rviz_setup(), w)                   # 이미 열려 있으면 그 창
+                # 설치가 도는 동안 [다시 확인]·[설치]·[제거]를 눌러도 두 번째 작업이 시작되지 않아야 함
+                import threading
+                gate = threading.Event()
+                fake.install.side_effect = lambda **kw: (gate.wait(10), st("ok", "ok", "ok"))[1]
+                fake.check.return_value = st("ok", "missing", "blocked")
+                w.busy = False
+                w.install()
+                checks = fake.check.call_count
+                w.refresh()
+                w.install()
+                w.uninstall()
+                root.update()
+                self.assertEqual(fake.check.call_count, checks)
+                self.assertEqual(fake.install.call_count, 2)
+                fake.uninstall.assert_not_called()
+                gate.set()
+                self.assertTrue(pump(root, app, lambda: not w.busy))
                 w.close()
         finally:
             app._on_close()
