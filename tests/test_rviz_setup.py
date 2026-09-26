@@ -76,7 +76,8 @@ class SetupScriptTest(unittest.TestCase):
         for needle in ("set -euo pipefail", "c0a7ad4", "--packages-select wlkata_mirobot_description",
                        "textures", "ros-humble-rviz2", "ros-humble-robot-state-publisher", "SETUP_OK",
                        "--image", "default=mirobot", " g++",
-                       "share/wlkata_mirobot_description/package.xml"):
+                       "share/wlkata_mirobot_description/package.xml", "IMAGE_PKGS=\"sudo\"",
+                       "mkdir -p /etc/sudoers.d"):
             self.assertIn(needle, text, needle)
 
     def test_script_syntax(self):

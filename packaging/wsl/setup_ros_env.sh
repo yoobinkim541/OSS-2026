@@ -49,6 +49,8 @@ fi
 
 # 2) RViz와 모델 빌드에 필요한 것 (CMake project()가 C++ 컴파일러를 찾음, 소프트웨어 렌더링용 Mesa 포함)
 PKGS="ros-humble-rviz2 ros-humble-robot-state-publisher python3-colcon-common-extensions g++ git libgl1-mesa-dri"
+IMAGE_PKGS="sudo"                 # 도커 ubuntu:22.04에는 sudo가 없음 (WSL 루트 파일에는 있음)
+[ "$IMAGE" -eq 1 ] && PKGS="$PKGS $IMAGE_PKGS"
 MISSING=""
 for p in $PKGS; do installed "$p" || MISSING="$MISSING $p"; done
 if [ -n "$MISSING" ]; then
@@ -63,6 +65,7 @@ fi
 TARGET_USER="$(id -un)"
 if [ "$IMAGE" -eq 1 ]; then
   id mirobot >/dev/null 2>&1 || useradd -m -s /bin/bash -G sudo mirobot
+  mkdir -p /etc/sudoers.d
   echo "mirobot ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/mirobot
   chmod 0440 /etc/sudoers.d/mirobot
   printf '[user]\ndefault=mirobot\n\n[boot]\nsystemd=false\n' > /etc/wsl.conf
