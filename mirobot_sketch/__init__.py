@@ -8,6 +8,9 @@
   mirobot_sim      기구학 시뮬레이션, 관절 한계 검사           (mirobot-sim)
   make_strokes     사진 -> 획 JSON 명령줄 도구                 (mirobot-strokes)
   gui              데스크톱 GUI                                (mirobot-sketch)
+  stages / edits   단계별 파이프라인(캐시), 획 편집 제안
+  draw_job         로봇으로 그리기(①~⑥ 안전 절차), virtual_robot 가상 시뮬레이션, live_progress RViz 따라가기
+  agent            LLM 에이전트 패널 (OpenRouter / Claude Code / Codex)
 """
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
