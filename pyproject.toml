@@ -37,7 +37,7 @@ agent = ["mcp>=2", "keyring>=25", "requests>=2.31"]
 build = ["pyinstaller>=6.0"]
 
 [project.urls]
-Repository = "https://github.com/yoobinkim541/OSS-2026"
+Repository = "https://github.com/yoobinkim541/OSS-2026-Mirobot-Photo-Sketch"
 
 # 콘솔 없이 창만 뜨는 GUI
 [project.gui-scripts]

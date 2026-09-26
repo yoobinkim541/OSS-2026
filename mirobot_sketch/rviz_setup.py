@@ -25,7 +25,7 @@ from .rviz_launch import ROS_CHECK, _no_window, list_distros, to_wsl_path
 
 DISTRO = "MirobotSketch-ROS"
 IMAGE_NAME = "MirobotSketch-ROS-humble-{version}.tar.gz"
-REPO = "yoobinkim541/OSS-2026"
+REPO = "yoobinkim541/OSS-2026-Mirobot-Photo-Sketch"
 MIN_FREE_BYTES = 5 * 2**30
 MANUAL_DISTRO = "Ubuntu-22.04"
 VERIFY_CMD = ("source /opt/ros/humble/setup.bash && source ~/mirobot_ws/install/setup.bash"

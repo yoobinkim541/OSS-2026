@@ -9,8 +9,8 @@
 
 <img src="assets/app_icon_256.png" width="128" alt="앱 아이콘: 로봇 팔이 이젤의 캔버스에 붓으로 그림을 그리는 모습">
 
-[![CI](https://github.com/yoobinkim541/OSS-2026/actions/workflows/ci.yml/badge.svg)](https://github.com/yoobinkim541/OSS-2026/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/yoobinkim541/OSS-2026)](https://github.com/yoobinkim541/OSS-2026/releases)
+[![CI](https://github.com/yoobinkim541/OSS-2026-Mirobot-Photo-Sketch/actions/workflows/ci.yml/badge.svg)](https://github.com/yoobinkim541/OSS-2026-Mirobot-Photo-Sketch/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/yoobinkim541/OSS-2026-Mirobot-Photo-Sketch)](https://github.com/yoobinkim541/OSS-2026-Mirobot-Photo-Sketch/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 사진을 입력하면 OpenCV로 선 경로를 만들고, WLKATA Mirobot 로봇팔이 벽에 붙인 A4 용지에 펜으로 그리는 오픈소스프로그래밍 텀프로젝트입니다.
@@ -22,7 +22,7 @@
 
 ### 설치
 
-**Windows 사용자 (파이썬 없이):** [Releases](https://github.com/yoobinkim541/OSS-2026/releases)에서 받습니다.
+**Windows 사용자 (파이썬 없이):** [Releases](https://github.com/yoobinkim541/OSS-2026-Mirobot-Photo-Sketch/releases)에서 받습니다.
 - `MirobotSketch-Setup-X.Y.Z.exe` (추천): 설치하면 시작 메뉴와 바탕화면(선택)에 **Mirobot Sketch** 바로가기가 생기고, "앱 및 기능"에서 제거할 수 있습니다. 관리자 권한은 필요 없습니다.
 - `MirobotSketch-vX.Y.Z-windows-x64.zip`: 설치 없이 압축을 풀어 `MirobotSketch.exe`(GUI)나 `mirobot.exe`(명령줄: `mirobot draw …`, `mirobot strokes …`, `mirobot sim …`)를 실행합니다.
 

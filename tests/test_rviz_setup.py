@@ -205,6 +205,7 @@ class InstallTest(unittest.TestCase):
 class UrlAndCommandsTest(unittest.TestCase):
     def test_image_urls_prefer_same_version_then_latest_release(self):
         url, sha = rs.image_urls("0.3.0", get=lambda url, **kw: FakeResp(200, b"abc  x\n"))
+        self.assertTrue(url.startswith("https://github.com/yoobinkim541/OSS-2026-Mirobot-Photo-Sketch/releases/"))
         self.assertTrue(url.endswith("/v0.3.0/MirobotSketch-ROS-humble-0.3.0.tar.gz"))
         self.assertEqual(sha, url + ".sha256")
 
