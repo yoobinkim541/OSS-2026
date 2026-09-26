@@ -66,6 +66,7 @@ class SketchSession:
         self.history = []      # 되돌리기용 스냅숏 (번호표, 편집 기록, 다음 번호, 설명)
         self.edit_log = []     # 적용된 편집 설명 (재현·기록용)
         self.sim = None
+        self.drawing_lock = False   # 로봇이 그리는 중이면 True (에이전트 도구가 설정·편집을 바꾸지 못하게)
         self.table = {}        # 번호 -> {"kind": stroke|candidate|gone, "poly": px 배열, "reason": 이유}
         self.next_id = 1
         self.book = {"removed": [], "added": [], "trash": []}   # 모양 기반 편집 기록 (다시 계산해도 유지)
@@ -298,20 +299,25 @@ class SketchSession:
         lim = self.cfg["limits_pending_verification"]
         if abs(x) > lim["max_abs_paper_x_mm"] or abs(y) > lim["max_abs_paper_y_mm"]:
             raise SessionError(f"좌표 ({x:.1f}, {y:.1f})mm가 허용 범위 ±{lim['max_abs_paper_x_mm']:.0f}mm 밖입니다")
-        pl = self.result["placement"]
-        sc, (cx, cy) = pl["scale_mm_per_px"], pl["center_px"]
+        sc, cx, cy = self._xf()
         return (x / sc + cx, -y / sc + cy)
 
-    def px_to_mm(self, pts):
+    def _xf(self):
+        """종이 배치의 (배율 mm/px, 중심 x, 중심 y) — 반올림하지 않은 값."""
         pl = self.result["placement"]
-        sc, (cx, cy) = pl["scale_mm_per_px"], pl["center_px"]
+        t = pl.get("transform")
+        if t:
+            return t["scale"], t["cx"], t["cy"]
+        return pl["scale_mm_per_px"], pl["center_px"][0], pl["center_px"][1]
+
+    def px_to_mm(self, pts):
+        sc, cx, cy = self._xf()
         p = np.asarray(pts, np.float64)
         return np.column_stack([(p[:, 0] - cx) * sc, -(p[:, 1] - cy) * sc])
 
     def _region_px(self, region_mm):
         x0, y0, x1, y1 = [float(v) for v in region_mm]
-        pl = self.result["placement"]
-        sc, (cx, cy) = pl["scale_mm_per_px"], pl["center_px"]
+        sc, cx, cy = self._xf()
         xs, ys = sorted((x0 / sc + cx, x1 / sc + cx)), sorted((-y0 / sc + cy, -y1 / sc + cy))
         return xs[0], ys[0], xs[1], ys[1]
 

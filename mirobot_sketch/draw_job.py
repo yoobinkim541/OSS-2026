@@ -38,8 +38,9 @@ class DrawJob:
         self._thread = None
 
     # ---------------------------------------------------------------- 사람이 누르는 것
-    def start(self, virtual=True, virtual_speed=20.0):
-        self._virtual, self._speed = bool(virtual), float(virtual_speed)
+    def start(self, virtual=True, virtual_speed=20.0, pending=False):
+        """pending: 실물 확인 전 넓은 범위(±60mm) 허용 — ① 사전 검사부터 적용 (④에서 바꿀 수도 있음)."""
+        self._virtual, self._speed, self._pending = bool(virtual), float(virtual_speed), bool(pending)
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -83,7 +84,7 @@ class DrawJob:
                 raise de.DrawError("preflight", f"로봇 시뮬레이션이 FAIL입니다: {verdict}",
                                    "그림 크기를 줄이거나 설정을 바꾼 뒤 다시 시뮬레이션하세요.")
             strokes = [[tuple(pt) for pt in st] for st in s.result["strokes_mm"]]
-            pre = de.preflight(strokes, self.cfg, pending=False, air=True)
+            pre = de.preflight(strokes, self.cfg, pending=self._pending, air=True)
             pl = s.result["placement"]
             self.summary = {"stroke_count": len(strokes), "command_count": len(pre["cmds"]),
                             "estimated_s": pre["timing"]["total_s"],

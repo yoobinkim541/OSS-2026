@@ -4,6 +4,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -22,6 +23,15 @@ def make_app():
     from mirobot_sketch import gui
     root.withdraw()
     return root, gui.SketchApp(root)
+
+
+def close_quietly(app):
+    """이미 닫혔으면 아무것도 안 함."""
+    try:
+        if app.root.winfo_exists():
+            app._on_close()
+    except Exception:  # TclError: 이미 파괴됨
+        pass
 
 
 def pump(root, app, until, timeout=60):
@@ -136,6 +146,70 @@ class GuiSmokeTest(unittest.TestCase):
                 self.assertTrue(pump(root, app, lambda: app._workers == 0 and app.result["detail"] == "low"))
         finally:
             app._on_close()
+
+
+    def _patched_dirs(self, d):
+        return (mock.patch("mirobot_sketch.draw_executor.paths.runs_dir", lambda: Path(d) / "runs"),
+                mock.patch("mirobot_sketch.draw_executor.paths.output_dir", lambda: Path(d)))
+
+    def test_draw_window_virtual_run(self):
+        root, app = make_app()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                p1, p2 = self._patched_dirs(d)
+                with p1, p2:
+                    p = Path(d) / "line.png"
+                    cv2.imwrite(str(p), golden.synthetic_images()["line"])
+                    app.load_image(p)
+                    self.assertTrue(pump(root, app, lambda: app.result is not None and app._workers == 0))
+                    app.session.update_params({"box_mm": 60, "epsilon_px": 4.0})
+                    app._schedule_recompute(0)
+                    self.assertTrue(pump(root, app, lambda: app._workers == 0 and
+                                         app.result["params"]["box_mm"] == 60))
+                    w = app.open_draw_window(launch_rviz=lambda *a, **k: None)
+                    w.virtual_var.set(True)
+                    w.speed_var.set("500×")
+                    w.begin()
+                    self.assertTrue(pump(root, app, lambda: w.job.state == "confirm", timeout=60))
+                    self.assertEqual(str(w.start_btn.cget("state")), "disabled")      # 체크 전에는 꺼짐
+                    w.check_var.set(True)
+                    w._on_check()
+                    self.assertEqual(str(w.start_btn.cget("state")), "normal")
+                    w.on_start()
+                    self.assertTrue(app.drawing)                                        # 실행 중 잠금
+                    self.assertTrue(app.session.drawing_lock)
+                    self.assertTrue(pump(root, app, lambda: w.finished is not None, timeout=120))
+                    self.assertEqual(w.finished["result"]["result"], "completed")
+                    self.assertFalse(app.drawing)
+                    self.assertTrue(list((Path(d) / "runs").glob("run-*.json")))
+                    w.close()
+        finally:
+            app._on_close()
+
+    def test_closing_app_while_drawing_stops_the_job(self):
+        root, app = make_app()
+        self.addCleanup(close_quietly, app)   # 실패해도 창을 닫아 다음 테스트에 안 번지게
+        with tempfile.TemporaryDirectory() as d:
+            p1, p2 = self._patched_dirs(d)
+            with p1, p2, mock.patch("mirobot_sketch.draw_window.messagebox.askyesno", return_value=True):
+                p = Path(d) / "line.png"
+                cv2.imwrite(str(p), golden.synthetic_images()["line"])
+                app.load_image(p)
+                self.assertTrue(pump(root, app, lambda: app.result is not None and app._workers == 0))
+                w = app.open_draw_window(launch_rviz=lambda *a, **k: None)
+                w.virtual_var.set(True)
+                w.speed_var.set("1×")
+                w.begin()
+                self.assertTrue(pump(root, app, lambda: w.job.state == "confirm", timeout=60))
+                w.check_var.set(True)
+                w._on_check()
+                w.on_start()
+                self.assertTrue(pump(root, app, lambda: w.job.state == "drawing", timeout=10))
+                job = w.job
+                app._on_close()                                   # 앱 종료: 묻고(예) 멈춘 뒤 닫음
+                job.join(5)
+                self.assertEqual(job.state, "done")
+                self.assertEqual(job.link.state, "closed")        # 포트(가상) 닫힘
 
 
 if __name__ == "__main__":

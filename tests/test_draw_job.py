@@ -108,6 +108,24 @@ class DrawJobTest(unittest.TestCase):
         self.assertIsNone(fin["record_path"])
         self.assertEqual(job.link.state, "closed")
 
+    def test_wide_range_choice_applies_to_preflight(self):
+        big = SketchSession()
+        big.set_image(Path(self.tmp.name) / "line.png")
+        big.update_params({"box_mm": 110, "epsilon_px": 4.0})       # ±55mm: 실행기 허용(±50) 밖, 넓은 범위(±60) 안
+        big.run_current()
+        big.simulate()
+        for pending, expect in ((False, "failed"), (True, "confirm")):
+            rec = Recorder()
+            job = self.job(rec)
+            job.session = big
+            job.start(virtual=True, virtual_speed=500, pending=pending)
+            if expect == "confirm":
+                self.assertTrue(rec.ready.wait(20))
+                job.cancel()
+            self.assertTrue(rec.done.wait(20))
+            pre = [st for i, st in rec.steps() if i == "preflight"]
+            self.assertEqual(pre[-1], "failed" if expect == "failed" else "done", pending)
+
     def test_rviz_unavailable_does_not_block_drawing(self):
         rec = Recorder()
 
