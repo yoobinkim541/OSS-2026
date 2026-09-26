@@ -116,6 +116,7 @@ class SketchApp:
         self._recompute_pending = False  # 에이전트 작업 중 들어온 재계산 요청 (끝나면 실행)
         self.drawing = False             # 로봇으로 그리는 중 (조절·편집·재계산 잠금)
         self.draw_window = None
+        self.rviz_setup_window = None
         # 작업 스레드 -> 화면: Tkinter는 스레드에 안전하지 않으므로 작업 스레드는 큐에
         # 할 일만 넣고, 메인 스레드가 주기적으로 꺼내 실행한다.
         self._ui_queue = queue.Queue()
@@ -247,6 +248,8 @@ class SketchApp:
         self.traj_btn = ctk.CTkButton(row, text="RViz 3D로 보기", command=self.view_rviz, font=font(12), height=32,
                                       fg_color="transparent", border_width=1, text_color=TEXT, state="disabled")
         self.traj_btn.pack(side="left", fill="x", expand=True, padx=(4, 0))
+        ctk.CTkButton(c3, text="RViz 3D 환경 설치·확인…", command=self.open_rviz_setup, font=font(12), height=28,
+                      fg_color="transparent", border_width=1, text_color=TEXT).pack(fill="x", padx=14, pady=(0, 3))
         self.progress = ctk.CTkProgressBar(c3, mode="indeterminate", height=6)
         self.progress.pack(fill="x", padx=14, pady=(6, 4))
         self.progress.set(0)
@@ -677,7 +680,7 @@ class SketchApp:
             self._set_status(f"RViz 창에서 20배속으로 반복 재생합니다. 창을 닫으면 멈춥니다.\n궤적: {traj_path}")
         except rviz_launch.RvizUnavailable as e:
             self._set_status("RViz를 열 수 없습니다.")
-            self._ui(messagebox.showinfo, "RViz 3D 보기", str(e))
+            self._ui(self._offer_rviz_setup, str(e))
         except Exception as e:
             self._ui(messagebox.showerror, "RViz 오류", str(e))
         finally:
@@ -718,6 +721,19 @@ class SketchApp:
         else:
             self.agent_panel.grid_remove()
             self.agent_btn.configure(fg_color="transparent", text_color=TEXT)
+
+    # ---------------------------------------------------------------- RViz 3D 환경 설치 도우미
+    def open_rviz_setup(self):
+        if self.rviz_setup_window is not None and self.rviz_setup_window.winfo_exists():
+            self.rviz_setup_window.focus()
+            return self.rviz_setup_window
+        from .rviz_setup_window import RvizSetupWindow
+        self.rviz_setup_window = RvizSetupWindow(self, font)
+        return self.rviz_setup_window
+
+    def _offer_rviz_setup(self, message):
+        if messagebox.askyesno("RViz 3D 보기", message + "\n\n지금 설치 도우미를 열까요?"):
+            self.open_rviz_setup()
 
     # ---------------------------------------------------------------- 로봇으로 그리기
     def open_draw_window(self, launch_rviz=None):
@@ -773,7 +789,9 @@ def main():
     ctk.set_appearance_mode("Light")
     ctk.set_default_color_theme("blue")
     root = ctk.CTk()
-    SketchApp(root)
+    app = SketchApp(root)
+    if "--setup-rviz" in sys.argv[1:]:          # 설치 프로그램의 "RViz 3D 환경도 설치" 선택
+        root.after(500, app.open_rviz_setup)
     root.mainloop()
 
 
