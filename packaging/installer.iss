@@ -41,7 +41,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "rvizenv"; Description: "RViz 3D 환경도 설치 (WSL2 + ROS 2, 약 1GB 다운로드)"; GroupDescription: "선택 기능:"; Flags: unchecked
+Name: "rvizenv"; Description: "RViz 3D 환경도 설치 (WSL2 + ROS 2, 약 400MB 다운로드)"; GroupDescription: "선택 기능:"; Flags: unchecked
 
 [Files]
 Source: "..\dist\MirobotSketch\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

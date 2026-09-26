@@ -135,17 +135,28 @@ mirobot-sim out/photo.json --plot out/joints.png --gif out/sim.gif
 mirobot-sim --reach-map out/reach_map.png
 ```
 
-RViz에서 실제 Mirobot 3D 모델로 재생하려면 궤적을 내보낸 뒤 WSL2(ROS 2 Humble)에서 실행합니다.
+### RViz 3D 환경 설치 (WSL2 + ROS 2 Humble + Mirobot 모델)
+
+RViz 3D 보기와 실시간 따라가기는 WSL2에 ROS 2 Humble과 WLKATA Mirobot 모델이 있어야 합니다. 설치 도우미가 알아서 갖춥니다.
+
+- **GUI:** "③ 실행"의 [RViz 3D 환경 설치·확인…] → [설치]. 미리 만든 이미지(약 400MB, 설치 후 약 2GB)를 받아 `MirobotSketch-ROS` 배포판으로 가져옵니다(약 2분 + 다운로드). 끊겨도 [이어서 설치]로 받던 곳부터 이어받습니다.
+- **명령줄:** `mirobot setup-rviz --check | --install | --uninstall | --manual | --wsl`
+- **설치 프로그램:** "RViz 3D 환경도 설치"를 체크하면 설치 후 도우미가 열립니다. 앱을 지울 때 배포판도 지울지 묻습니다.
+- **WSL이 없는 PC:** [WSL 설치(관리자)] → Windows 승인 → 재부팅 → [설치]. 관리자 권한은 이 한 번뿐이고 비밀번호는 받지 않습니다.
+- **예비 경로:** 이미지를 받을 수 없으면 [직접 설치(예비)]로 `Ubuntu-22.04`에서 `packaging/wsl/setup_ros_env.sh`를 실행합니다(sudo 비밀번호는 사용자가 콘솔에 직접 입력).
+- 기존 WSL 배포판은 건드리지 않습니다. 다른 배포판을 쓰려면 환경 변수 `MIROBOT_WSL_DISTRO`.
+
+손으로 재생하려면 궤적을 내보낸 뒤 WSL2에서 실행합니다.
 
 ```bash
 mirobot-sim out/photo.json --export out/photo_traj.json
-wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/c/Users/asus/Desktop/Mirobot && bash sim/run_rviz.sh out/photo_traj.json 10"
+wsl -d MirobotSketch-ROS -- bash -lc "cd /mnt/c/<저장소 경로> && bash sim/run_rviz.sh out/photo_traj.json 10"
 ```
 
 ### 배포 (CI/CD)
 
 - **CI** (`.github/workflows/ci.yml`): main push와 PR마다 Windows/Ubuntu × Python 3.11/3.13에서 테스트와 명령줄 도구 동작을 확인합니다.
-- **CD** (`.github/workflows/release.yml`): `v*` 태그를 push하면 Windows .exe를 빌드하고, 빌드된 exe로 동작을 확인한 뒤 GitHub Releases에 zip으로 올립니다.
+- **CD** (`.github/workflows/release.yml`): `v*` 태그를 push하면 Windows .exe를 빌드하고, 빌드된 exe로 동작을 확인한 뒤 GitHub Releases에 zip으로 올립니다. 같은 릴리스에 RViz 3D 환경 이미지(`ubuntu:22.04` 컨테이너에서 설치 스크립트로 만들고 ROS·모델을 확인한 WSL 루트 파일, SHA256 포함)도 올립니다.
 - **Dependabot** (`.github/dependabot.yml`): Actions와 의존성 업데이트를 매주 PR로 알려 줍니다.
 
 새 버전 배포:
