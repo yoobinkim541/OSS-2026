@@ -13,4 +13,4 @@
   agent            LLM 에이전트 패널 (OpenRouter / Claude Code / Codex)
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

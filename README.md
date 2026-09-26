@@ -162,7 +162,7 @@ wsl -d MirobotSketch-ROS -- bash -lc "cd /mnt/c/<저장소 경로> && bash sim/r
 새 버전 배포:
 
 ```bash
-git tag -a v0.2.0 -m "..." && git push origin v0.2.0
+git tag -a v0.3.0 -m "..." && git push origin v0.3.0
 ```
 
 `mirobot_sketch/__init__.py`의 `__version__`도 함께 올립니다.
