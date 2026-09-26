@@ -100,6 +100,26 @@ class ProgressFileTest(unittest.TestCase):
             self.assertEqual(len(calls), 3)
             self.assertEqual(lp.read_progress(Path(d) / "p.json")["state"], "running")
 
+    def test_write_never_raises_and_retries_tmp_open(self):
+        with tempfile.TemporaryDirectory() as d:
+            w = lp.ProgressWriter(Path(d) / "p.json")
+            real_open = open
+            calls = []
+
+            def flaky_open(path, *a, **k):
+                if str(path).endswith(".tmp"):
+                    calls.append(1)
+                    if len(calls) < 3:
+                        raise PermissionError("tmp locked")
+                return real_open(path, *a, **k)
+
+            with mock.patch("builtins.open", side_effect=flaky_open):
+                w.write(state="running")
+            self.assertEqual(lp.read_progress(Path(d) / "p.json")["state"], "running")
+            with mock.patch.object(lp.os, "replace", side_effect=OSError("always locked")):
+                w.write(state="done")                          # 예외 없이 넘어가고 기록만 남김
+            self.assertIn("always locked", w.last_error)
+
     def test_read_missing_or_broken(self):
         with tempfile.TemporaryDirectory() as d:
             self.assertIsNone(lp.read_progress(Path(d) / "none.json"))

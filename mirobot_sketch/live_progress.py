@@ -21,22 +21,29 @@ FINAL_STATES = ("stopped", "error", "done")
 class ProgressWriter:
     """임시 파일에 쓴 뒤 os.replace로 바꿔 넣음 (읽는 쪽이 반쪽 JSON을 보지 않게)."""
 
+    RETRIES = 20
+
     def __init__(self, path):
         self.path = str(path)
         self.tmp = self.path + ".tmp"
         self.fields = {"tcp_mm": None}
+        self.last_error = None
 
     def write(self, **fields):
+        """예외를 내지 않음: 진행 파일은 보조 정보라, 쓰기 실패가 실제 드로잉을 멈추면 안 됨 (last_error에 기록)."""
         self.fields.update(fields)
         self.fields["t"] = time.time()
         data = json.dumps(self.fields, ensure_ascii=False)
-        with open(self.tmp, "w", encoding="utf-8") as f:
-            f.write(data)
-        for attempt in range(20):   # Windows: 읽는 쪽이 잠깐 열고 있으면 교체가 실패할 수 있음
+        # Windows: 백신·읽는 쪽이 잠깐 파일을 잡고 있으면 실패할 수 있음. 계속 실패 중이면 짧게만 시도(드로잉을 늦추지 않게)
+        for attempt in range(self.RETRIES if self.last_error is None else 2):
             try:
+                with open(self.tmp, "w", encoding="utf-8") as f:
+                    f.write(data)
                 os.replace(self.tmp, self.path)
+                self.last_error = None
                 break
-            except PermissionError:
+            except OSError as e:
+                self.last_error = str(e)
                 time.sleep(0.005 * (attempt + 1))
         return dict(self.fields)
 

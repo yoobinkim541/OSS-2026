@@ -199,8 +199,9 @@ class SketchApp:
 
         c1 = Card(side, "① 이미지")
         c1.pack(fill="x", pady=(0, 10))
-        ctk.CTkButton(c1, text="이미지 열기", command=self.open_image, font=font(13), height=36,
-                      fg_color=ACCENT).pack(fill="x", padx=14)
+        self.open_btn = ctk.CTkButton(c1, text="이미지 열기", command=self.open_image, font=font(13), height=36,
+                                      fg_color=ACCENT)
+        self.open_btn.pack(fill="x", padx=14)
         self.path_label = ctk.CTkLabel(c1, text="선택된 파일 없음", font=font(11), text_color=MUTED,
                                        wraplength=300, anchor="w", justify="left")
         self.path_label.pack(fill="x", padx=14, pady=(4, 8))
@@ -521,7 +522,7 @@ class SketchApp:
             self.progress.stop()
             self.progress.configure(mode="determinate")
             self.progress.set(0)
-            state = "disabled" if self._agent_busy else "normal"
+            state = "disabled" if self._agent_busy or self.drawing else "normal"
             self.run_btn.configure(state=state)
             self.sim_btn.configure(state=state)
         self._ui(done)
@@ -720,6 +721,9 @@ class SketchApp:
         self.session.drawing_lock = self.drawing
         self.agent_busy(self._agent_busy)
         self.draw_btn.configure(state="disabled" if self.drawing else "normal")
+        self.open_btn.configure(state="disabled" if self.drawing else "normal")
+        # 메인 'RViz 3D로 보기'는 run_rviz.sh가 떠 있는 따라가기 화면을 정리(pkill)하므로 그리는 중엔 잠금
+        self.traj_btn.configure(state="disabled" if self.drawing or not self.result else "normal")
         if not self.drawing:
             self.st_time.set(f"{self.result['timing']['total_s'] / 60:.1f}분" if self.result else "—",
                              self.st_time.sub.cget("text"))

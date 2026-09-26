@@ -147,6 +147,55 @@ class DrawJobTest(unittest.TestCase):
         self.assertLess(time.monotonic() - t0, 1.0)       # RViz를 기다리지 않고 바로 첫 명령
         self.assertTrue(rec.done.wait(60))
 
+    def test_state_is_active_as_soon_as_started(self):
+        rec = Recorder()
+        job = self.job(rec)
+        job.start(virtual=True, virtual_speed=500)
+        self.assertNotEqual(job.state, "idle")             # 첫 이벤트 전에 닫아도 '진행 중'으로 보이게
+        self.assertTrue(rec.ready.wait(10))
+        job.cancel()
+        self.assertTrue(rec.done.wait(5))
+
+    def test_session_changes_after_step1_do_not_affect_the_run(self):
+        rec = Recorder()
+        job = self.job(rec)
+        path = self.session.result["path"]
+        job.start(virtual=True, virtual_speed=500)
+        self.assertTrue(rec.ready.wait(10))
+        saved = (self.session.result, self.session.sim)
+        self.session.result, self.session.sim = None, None     # 호밍 중에 이미지를 바꾸거나 편집한 상황
+        try:
+            job.confirm(checked=True)
+            self.assertTrue(rec.done.wait(60))
+        finally:
+            self.session.result, self.session.sim = saved
+        fin = next(d for k, d in rec.events if k == "finished")
+        self.assertEqual(fin["result"]["result"], "completed")   # ①에서 찍어 둔 획으로 끝까지
+        self.assertTrue(Path(fin["record_path"]).exists())
+        import json
+        self.assertEqual(json.loads(Path(fin["record_path"]).read_text(encoding="utf-8"))["strokes_json"], path)
+
+    def test_progress_file_failures_never_abort_drawing(self):
+        rec = Recorder()
+        job = self.job(rec)
+        with mock.patch.object(lp.os, "replace", side_effect=OSError("locked by antivirus")):
+            job.start(virtual=True, virtual_speed=500)
+            self.assertTrue(rec.ready.wait(10))
+            job.confirm(checked=True)
+            self.assertTrue(rec.done.wait(60))
+        fin = next(d for k, d in rec.events if k == "finished")
+        self.assertEqual(fin["result"]["result"], "completed")
+
+    def test_port_close_error_still_finishes(self):
+        rec = Recorder()
+        job = self.job(rec)
+        from mirobot_sketch import virtual_robot
+        with mock.patch.object(virtual_robot.VirtualMirobotLink, "close", side_effect=OSError("close failed")):
+            job.start(virtual=True, virtual_speed=500)
+            self.assertTrue(rec.ready.wait(10))
+            job.cancel()
+            self.assertTrue(rec.done.wait(5))                 # finished가 와야 GUI 잠금이 풀림
+
     def test_rviz_unavailable_does_not_block_drawing(self):
         rec = Recorder()
 

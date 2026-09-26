@@ -212,5 +212,45 @@ class GuiSmokeTest(unittest.TestCase):
                 self.assertEqual(job.link.state, "closed")        # 포트(가상) 닫힘
 
 
+    def test_lock_starts_at_begin_and_stuck_close_keeps_lock(self):
+        root, app = make_app()
+        self.addCleanup(close_quietly, app)
+        with tempfile.TemporaryDirectory() as d:
+            p1, p2 = self._patched_dirs(d)
+            with p1, p2, mock.patch("mirobot_sketch.draw_window.messagebox.askyesno", return_value=True), \
+                    mock.patch("mirobot_sketch.draw_window.messagebox.showwarning"):
+                p = Path(d) / "line.png"
+                cv2.imwrite(str(p), golden.synthetic_images()["line"])
+                app.load_image(p)
+                self.assertTrue(pump(root, app, lambda: app.result is not None and app._workers == 0))
+                w = app.open_draw_window(launch_rviz=lambda *a, **k: None)
+                w.begin()
+                self.assertTrue(app.drawing)                          # ①부터 잠금 (호밍 중 편집 금지)
+                self.assertEqual(str(app.open_btn.cget("state")), "disabled")
+                self.assertEqual(str(app.traj_btn.cget("state")), "disabled")
+                self.assertTrue(pump(root, app, lambda: w.job.state == "confirm", timeout=60))
+                real_job = w.job
+
+                class Stuck:                                          # 로봇 응답을 기다리느라 안 끝나는 작업
+                    state = "drawing"
+
+                    def stop(self):
+                        pass
+
+                    def join(self, timeout=None):
+                        pass
+
+                    def is_alive(self):
+                        return True
+
+                w.job, w.close_timeout = Stuck(), 0.1
+                self.assertFalse(w.close())                           # 안 닫고 잠금 유지
+                self.assertTrue(w.winfo_exists())
+                self.assertTrue(app.drawing)
+                w.job = real_job
+                self.assertTrue(w.close())
+                self.assertFalse(app.drawing)
+
+
 if __name__ == "__main__":
     unittest.main()

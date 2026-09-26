@@ -27,6 +27,8 @@ class DrawWindow(ctk.CTkToplevel):
         super().__init__(app.root)
         self.app, self.session, self.cfg, self.font = app, session, cfg, font
         self.launch_rviz, self.job, self.finished = launch_rviz, None, None
+        # 닫을 때 작업이 끝나길 기다리는 시간: 로봇이 명령 응답을 기다리는 최대 시간 + 여유
+        self.close_timeout = float(cfg.get("ack_timeout_s", 15)) + 5
         self.title("로봇으로 그리기")
         self.geometry("780x520")
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -91,6 +93,7 @@ class DrawWindow(ctk.CTkToplevel):
     def begin(self):
         """①~④: 사전 검사 → 연결·호밍 → 시작 위치 → 최종 확인에서 멈춰 기다림."""
         self.begin_btn.configure(state="disabled")
+        self.app.set_drawing(True)          # ①부터 잠금: 호밍 중 편집·이미지 열기로 그릴 그림이 바뀌지 않게
         speed = float(self.speed_var.get().rstrip("×"))
         self.job = DrawJob(self.session, self.cfg, lambda kind, **d: self.app.ui(self._event, kind, d),
                            launch_rviz=self.launch_rviz)
@@ -107,7 +110,6 @@ class DrawWindow(ctk.CTkToplevel):
         self.start_btn.configure(state="disabled")
         self.check_box.configure(state="disabled")
         self.stop_btn.configure(state="normal", text="■ 멈춤")
-        self.app.set_drawing(True)
 
     def on_stop(self):
         if self.job:
@@ -125,12 +127,17 @@ class DrawWindow(ctk.CTkToplevel):
             self.detail.configure(text=f"RViz를 열 수 없습니다: {e}")
 
     def close(self):
-        """진행 중이면 묻고, 멈춘 뒤(포트 닫힘) 닫음. 닫았으면 True."""
-        if self.job and self.job.state in ACTIVE_STATES:
+        """진행 중이면 묻고, 멈춘 뒤(포트가 닫힐 때까지) 닫음. 닫았으면 True.
+        작업이 끝나지 않으면(로봇 응답 대기 등) 창과 잠금을 그대로 두고 알림 — 포트를 붙잡은 스레드를 남기지 않게."""
+        if self.job and (self.job.state in ACTIVE_STATES or self.job.is_alive()):
             if not messagebox.askyesno("로봇으로 그리기", "진행 중입니다. 멈추고 닫을까요?", parent=self):
                 return False
             self.job.stop()
-            self.job.join(10)
+            self.job.join(self.close_timeout)
+            if self.job.is_alive():
+                messagebox.showwarning("로봇으로 그리기", "로봇 응답을 기다리는 중이라 아직 닫을 수 없습니다. "
+                                                   "잠시 뒤 다시 닫아 주세요.", parent=self)
+                return False
         self.app.set_drawing(False)
         self.destroy()
         return True
@@ -165,13 +172,17 @@ class DrawWindow(ctk.CTkToplevel):
         elif kind == "rviz":
             self.rviz_btn.configure(state="normal" if d["ok"] else "disabled")
             if not d["ok"]:
-                self.detail.configure(text=f"RViz 없이 진행합니다: {d['message']}")
+                self.rviz_note = f"RViz 없이 진행합니다: {d['message']}"
+                self.detail.configure(text=self.rviz_note)
         elif kind == "finished":
             self.finished = d
             self.stop_btn.configure(state="disabled")
             r = d["result"]["result"]
             self.todo.configure(text={"completed": "완료했습니다", "stopped_by_user": "멈췄습니다 (자동 복구 없음)",
                                       "cancelled": "취소했습니다"}.get(r, f"끝: {r}"))
+            note = getattr(self, "rviz_note", "")
             if d.get("record_path"):
-                self.detail.configure(text=f"실행 기록: {d['record_path']}")
+                self.detail.configure(text=f"실행 기록: {d['record_path']}" + (f"\n{note}" if note else ""))
+            self.start_btn.configure(state="disabled")
+            self.check_box.configure(state="disabled")
             self.app.set_drawing(False)

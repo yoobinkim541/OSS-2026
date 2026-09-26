@@ -32,6 +32,7 @@ class DrawJob:
         self.summary = {}
         self.link = None
         self._traj_path = None
+        self._snap = None
         self._confirm = threading.Event()
         self._stop = threading.Event()
         self._choice = {}
@@ -41,6 +42,7 @@ class DrawJob:
     def start(self, virtual=True, virtual_speed=20.0, pending=False):
         """pending: 실물 확인 전 넓은 범위(±60mm) 허용 — ① 사전 검사부터 적용 (④에서 바꿀 수도 있음)."""
         self._virtual, self._speed, self._pending = bool(virtual), float(virtual_speed), bool(pending)
+        self.state = "preflight"      # 첫 이벤트 전에 창을 닫아도 '진행 중'으로 보이게 (스레드 시작 전에)
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -63,6 +65,9 @@ class DrawJob:
         if self._thread:
             self._thread.join(timeout)
 
+    def is_alive(self):
+        return bool(self._thread and self._thread.is_alive())
+
     # ---------------------------------------------------------------- 작업 스레드
     def _step(self, sid, status, message="", hint=""):
         if status == "active":
@@ -79,13 +84,22 @@ class DrawJob:
             self._step("preflight", "active", "범위와 로봇 시뮬레이션을 확인합니다")
             if s.sim is None:
                 s.simulate()
-            verdict = s.sim["summary"]["verdict"]
+            # ①에서 그릴 획·시뮬레이션·경로를 한 번에 찍어 둠: 이후 세션이 바뀌어도(편집·이미지 열기)
+            # 로봇이 그리는 것, 확인 요약, RViz 궤적, 실행 기록이 모두 같은 그림을 가리키게
+            with s.lock:
+                if s.result is None or s.sim is None:
+                    raise de.DrawError("preflight", "처리 결과나 시뮬레이션이 없습니다.", "이미지를 다시 처리하세요.")
+                snap = {"strokes": [[tuple(pt) for pt in st] for st in s.result["strokes_mm"]],
+                        "sim_raw": s.sim["raw"], "verdict": s.sim["summary"]["verdict"], "path": s.result["path"],
+                        "params": dict(s.result["params"]), "placement": dict(s.result["placement"])}
+            self._snap = snap
+            verdict = snap["verdict"]
             if verdict.startswith("FAIL"):
                 raise de.DrawError("preflight", f"로봇 시뮬레이션이 FAIL입니다: {verdict}",
                                    "그림 크기를 줄이거나 설정을 바꾼 뒤 다시 시뮬레이션하세요.")
-            strokes = [[tuple(pt) for pt in st] for st in s.result["strokes_mm"]]
+            strokes = snap["strokes"]
             pre = de.preflight(strokes, self.cfg, pending=self._pending, air=True)
-            pl = s.result["placement"]
+            pl = snap["placement"]
             self.summary = {"stroke_count": len(strokes), "command_count": len(pre["cmds"]),
                             "estimated_s": pre["timing"]["total_s"],
                             "drawing_mm": [pl["drawing_width_mm"], pl["drawing_height_mm"]],
@@ -138,9 +152,9 @@ class DrawJob:
                 self._step("drawing", "failed", "사용자 멈춤" if final == "stopped" else result.get("error", ""),
                            "자동 복구를 하지 않았습니다. 펜과 로봇 상태를 확인하세요.")
             record = de.write_run_record({
-                "strokes_json": s.result["path"], "stroke_count": len(strokes), "command_count": total,
+                "strokes_json": snap["path"], "stroke_count": len(strokes), "command_count": total,
                 "air_mode": ch["air"], "pending_limits": ch["pending"], "estimated_time": pre["timing"],
-                "source": {"image": s.result["path"], "params": s.result["params"]},
+                "source": {"image": snap["path"], "params": snap["params"]},
                 "virtual": self._virtual, "virtual_speed": self._speed if self._virtual else None,
                 "run_id": run_id, "trajectory": str(traj)}, result, self.cfg)
         except de.DrawError as e:
@@ -154,7 +168,11 @@ class DrawJob:
             writer.write(state="error", message=str(e))
         finally:
             if self.link is not None:
-                self.link.close()
+                try:
+                    self.link.close()
+                except Exception as e:  # 닫기 실패해도 finished는 보내야 GUI 잠금이 풀림
+                    self.events("step", id="done", status="failed", message=f"포트 닫기 실패: {e}",
+                                hint="USB를 뺐다 꽂고 앱을 다시 시작하세요.")
             self._step("done", "active", "")
             self._step("done", "done", result["result"])
             self.state = "done"
@@ -163,7 +181,7 @@ class DrawJob:
     def _write_trajectory(self, run_id):
         from . import mirobot_sim as ms
         path = paths.output_dir() / f"live_traj_{run_id}.json"
-        doc = ms.trajectory_doc(self.session.sim["raw"], self.cfg, self.session.result["path"])
+        doc = ms.trajectory_doc(self._snap["sim_raw"], self.cfg, self._snap["path"])
         path.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
         self._traj_path = path
         return path
