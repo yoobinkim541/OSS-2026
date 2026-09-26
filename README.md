@@ -7,7 +7,7 @@
 
 ## 텀프로젝트: Mirobot Photo Sketch
 
-<img src="assets/app_icon_256.png" width="128" alt="앱 아이콘: 로봇 팔이 종이에 하트를 그리는 모습">
+<img src="assets/app_icon_256.png" width="128" alt="앱 아이콘: 로봇 팔이 이젤의 캔버스에 붓으로 그림을 그리는 모습">
 
 [![CI](https://github.com/yoobinkim541/OSS-2026/actions/workflows/ci.yml/badge.svg)](https://github.com/yoobinkim541/OSS-2026/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/yoobinkim541/OSS-2026)](https://github.com/yoobinkim541/OSS-2026/releases)
