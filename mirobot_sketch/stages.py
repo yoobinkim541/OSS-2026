@@ -7,6 +7,7 @@
 설정이 바뀐 첫 단계부터만 다시 계산합니다. (편집·순서·종이 배치는 session.py가 이어서 처리)
 """
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Callable
 
@@ -55,6 +56,7 @@ class Stage:
     params: tuple
     run: Callable = None      # run(prev: dict, p: dict) -> dict (prev를 이어받아 새 값을 더함)
     preview: Callable = None  # preview(out: dict) -> BGR 이미지 (입력과 같은 크기)
+    desc: str = ""            # 이 단계가 하는 일 (한 줄, 화면 안내용)
 
 
 class StaleRun(Exception):
@@ -175,9 +177,28 @@ ALL_STAGES = STAGES + (
     Stage("paper", "순서·종이", (
         ParamSpec("box_mm", "그리기 크기 (mm, 긴 변)", "int", 100, 30, 120, help="실행기 허용 범위는 설정 파일 기준"),)),
 )
+_DESCS = {
+    "source": "입력 사진 (긴 변 800px로 맞춤). 배경 제거를 켜면 인물만 남김",
+    "prep": "흑백으로 바꾸고 블러·미디언으로 잔무늬와 망점을 줄임",
+    "edges": "밝기(또는 색)가 급히 바뀌는 곳을 경계로 찾음",
+    "trace": "두께 있는 경계를 1px 중심선으로 만들고, 이어진 선마다 획 하나로 따라감",
+    "dedupe": "굵은 선의 양쪽 경계가 두 줄로 잡힌 이중선을 하나로 줄임",
+    "merge": "끝이 닿는 획을 이어 펜을 드는 횟수를 줄임",
+    "simplify": "곡선 모양은 유지하며 점 수(= 로봇 명령 수)를 줄임",
+    "edit": "번호 붙은 최종 획. 살리기·지우기·점 편집 제안을 확인하고 적용",
+    "paper": "그리는 순서를 정해 A4 위에 배치하고 시간을 추정",
+}
+STAGES = tuple(dataclasses.replace(st, desc=_DESCS[st.id]) for st in STAGES)
+ALL_STAGES = tuple(dataclasses.replace(st, desc=_DESCS[st.id]) for st in ALL_STAGES)
 PIPELINE_IDS = tuple(s.id for s in STAGES)
 STAGE_BY_ID = {s.id: s for s in ALL_STAGES}
 PARAM_SPECS = {p.key: p for s in ALL_STAGES for p in s.params}
+
+
+def stage_title(stage_id):
+    """번호 붙은 단계 이름 (예: "④ 뼈대·획")."""
+    k = next(i for i, st in enumerate(ALL_STAGES) if st.id == stage_id)
+    return f"{'①②③④⑤⑥⑦⑧⑨'[k]} {ALL_STAGES[k].label}"
 
 
 def default_params():

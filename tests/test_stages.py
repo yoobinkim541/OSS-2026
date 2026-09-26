@@ -37,6 +37,13 @@ class ParamSpecTest(unittest.TestCase):
             s["edge_mode"].clamp("rainbow")
 
 
+class StageTextTest(unittest.TestCase):
+    def test_every_stage_has_number_and_description(self):
+        for k, st in enumerate(stages.ALL_STAGES):
+            self.assertTrue(st.desc, st.id)
+            self.assertEqual(stages.stage_title(st.id), f"{'①②③④⑤⑥⑦⑧⑨'[k]} {st.label}")
+
+
 class PipelineTest(unittest.TestCase):
     def test_late_change_only_recomputes_late_stages(self):
         pl, p = stages.Pipeline(), stages.default_params()
