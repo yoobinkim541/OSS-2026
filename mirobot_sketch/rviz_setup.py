@@ -255,3 +255,78 @@ def uninstall(run=subprocess.run, name=DISTRO):
         return False
     _wsl(run, "--unregister", name, timeout=300)
     return True
+
+
+def log(msg):
+    """설치 기록 (사용자 폴더의 rviz_setup.log). 기록 실패는 무시."""
+    import datetime
+    try:
+        with open(paths.user_dir() / "rviz_setup.log", "a", encoding="utf-8") as f:
+            f.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S} {msg}\n")
+    except OSError:
+        pass
+
+
+MARK = {"ok": "✓", "missing": "✕", "blocked": "○"}
+
+
+def _print_steps(steps):
+    for s in steps:
+        print(f"{MARK[s.state]} {s.label}" + (f" — {s.detail}" if s.detail else ""))
+    todo = next((s for s in steps if s.state == "missing"), None)
+    print("RViz 3D 환경 준비 완료" if todo is None else f"할 일: {todo.hint}")
+
+
+def main(argv=None):
+    """mirobot setup-rviz --check | --install | --uninstall | --manual | --wsl"""
+    paths.safe_console()
+    import argparse
+    ap = argparse.ArgumentParser(prog="mirobot setup-rviz", description="RViz 3D 환경(WSL2 + ROS 2 Humble) 설치 도우미")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--check", action="store_true", help="상태 확인 (준비되면 종료 코드 0)")
+    g.add_argument("--install", action="store_true", help="RViz 환경 이미지를 받아 설치 (이어받기)")
+    g.add_argument("--uninstall", action="store_true", help=f"{DISTRO} 배포판 제거")
+    g.add_argument("--manual", action="store_true", help="예비: Ubuntu-22.04에서 설치 스크립트 실행 (새 콘솔)")
+    g.add_argument("--wsl", action="store_true", help="WSL 기능 설치 (관리자 승인 창, 끝나면 재부팅)")
+    a = ap.parse_args(argv)
+    if a.install:
+        last = {}
+
+        def progress(stage, done, total):
+            pct = int(100 * done / total) if total else 0
+            if last.get(stage) != pct // 5:
+                last[stage] = pct // 5
+                print(f"{stage} {pct}%" if total else stage, flush=True)
+        try:
+            log("설치 시작")
+            steps = install(progress=progress)
+        except SetupError as e:
+            log(f"설치 실패 ({e.step}): {e.message}")
+            print(f"실패: {e.message}")
+            if e.hint:
+                print(e.hint)
+            if e.step == "wsl":
+                print("WSL 기능 설치: mirobot setup-rviz --wsl")
+            return 1
+        log("설치 끝: " + ", ".join(f"{s.id}={s.state}" for s in steps))
+        _print_steps(steps)
+        return 0 if all(s.ok for s in steps) else 1
+    if a.uninstall:
+        print("제거했습니다." if uninstall() else f"{DISTRO} 배포판이 없습니다.")
+        log("제거")
+        return 0
+    if a.manual:
+        manual_install()
+        print("새 콘솔에서 진행합니다. sudo 비밀번호는 그 콘솔에 직접 입력하세요.")
+        return 0
+    if a.wsl:
+        install_wsl_feature()
+        print("관리자 승인 창에서 [예]를 누르고, 끝나면 PC를 재부팅한 뒤 다시 설치하세요.")
+        return 0
+    steps = check()
+    _print_steps(steps)
+    return 0 if all(s.ok for s in steps) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

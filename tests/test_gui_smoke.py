@@ -64,6 +64,40 @@ class GuiSmokeTest(unittest.TestCase):
         finally:
             app._on_close()
 
+    def test_rviz_setup_window_shows_steps_and_installs(self):
+        from mirobot_sketch import rviz_setup as rs
+        from mirobot_sketch import rviz_setup_window as rsw
+
+        def st(*states):
+            return [rs.SetupStep(i, lab, s, hint="할 일 " + i if s != "ok" else "")
+                    for (i, lab), s in zip((("wsl", "① WSL"), ("env", "② 환경"), ("verify", "③ 확인")), states)]
+
+        fake = mock.Mock()
+        fake.SetupError = rs.SetupError
+        fake.check.return_value = st("ok", "missing", "blocked")
+
+        def install(progress=None, should_cancel=None, **kw):
+            progress("다운로드", 50, 100)
+            return st("ok", "ok", "ok")
+        fake.install.side_effect = install
+        root, app = make_app()
+        try:
+            with mock.patch.object(rsw, "rs", fake):
+                w = app.open_rviz_setup()
+                self.assertTrue(pump(root, app, lambda: w.steps["env"].cget("text").startswith("✕")))
+                self.assertTrue(w.steps["wsl"].cget("text").startswith("✓"))
+                self.assertTrue(w.steps["verify"].cget("text").startswith("○"))
+                self.assertIn("할 일 env", w.todo.cget("text"))
+                self.assertEqual(w.install_btn.cget("text"), "설치")
+                w.install()
+                self.assertTrue(pump(root, app, lambda: w.steps["verify"].cget("text").startswith("✓")))
+                fake.install.assert_called_once()
+                self.assertIn("준비", w.todo.cget("text"))
+                self.assertIs(app.open_rviz_setup(), w)                   # 이미 열려 있으면 그 창
+                w.close()
+        finally:
+            app._on_close()
+
     def test_edit_stage_shows_proposals_and_applies(self):
         root, app = make_app()
         try:

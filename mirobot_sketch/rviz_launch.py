@@ -21,7 +21,7 @@ ROS_CHECK = "test -f /opt/ros/humble/setup.bash && test -f $HOME/mirobot_ws/inst
 SETUP_HINT = ("RViz 3D 보기는 WSL2 Ubuntu 22.04에 ROS 2 Humble과 ~/mirobot_ws"
               "(wlkata_mirobot_description)가 설치된 PC에서만 됩니다.\n"
               "그 외에는 '로봇 시뮬레이션' 결과(관절 여유)로 확인하세요.\n"
-              "→ 'RViz 3D 환경…' 버튼(또는 mirobot setup-rviz)으로 자동 설치할 수 있습니다.")
+              "→ 'RViz 3D 환경 설치·확인…' 버튼(또는 mirobot setup-rviz)으로 자동 설치할 수 있습니다.")
 HELPER_DISTRO = "MirobotSketch-ROS"   # rviz_setup이 만드는 전용 배포판
 
 _distro_cache = {}

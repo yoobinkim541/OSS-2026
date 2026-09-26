@@ -237,5 +237,51 @@ class UrlAndCommandsTest(unittest.TestCase):
         self.assertTrue(rs.script_path().exists())
 
 
+def steps(*states):
+    ids = ("wsl", "env", "verify")
+    return [rs.SetupStep(i, i, s, hint="hint-" + i if s != "ok" else "") for i, s in zip(ids, states)]
+
+
+class CliTest(unittest.TestCase):
+    def test_check_exit_code(self):
+        with mock.patch.object(rs, "check", return_value=steps("ok", "ok", "ok")):
+            self.assertEqual(rs.main(["--check"]), 0)
+        with mock.patch.object(rs, "check", return_value=steps("ok", "missing", "blocked")):
+            self.assertEqual(rs.main(["--check"]), 1)
+
+    def test_install_reports_error_hint(self):
+        err = rs.SetupError("wsl", "WSL 기능이 없습니다.", "관리자 승인")
+        with mock.patch.object(rs, "install", side_effect=err), mock.patch("builtins.print") as pr:
+            self.assertEqual(rs.main(["--install"]), 1)
+        text = " ".join(str(c.args[0]) for c in pr.call_args_list)
+        self.assertIn("관리자 승인", text)
+        self.assertIn("--wsl", text)                           # WSL 기능 설치 명령을 안내
+        with mock.patch.object(rs, "install", return_value=steps("ok", "ok", "ok")):
+            self.assertEqual(rs.main(["--install"]), 0)
+
+    def test_other_commands(self):
+        with mock.patch.object(rs, "uninstall", return_value=True) as un:
+            self.assertEqual(rs.main(["--uninstall"]), 0)
+        un.assert_called_once()
+        with mock.patch.object(rs, "manual_install") as man:
+            self.assertEqual(rs.main(["--manual"]), 0)
+        man.assert_called_once()
+        with mock.patch.object(rs, "install_wsl_feature") as feat:
+            self.assertEqual(rs.main(["--wsl"]), 0)
+        feat.assert_called_once()
+
+    def test_log_is_written(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(rs.paths, "user_dir", lambda: Path(d)):
+            rs.log("hello")
+            self.assertIn("hello", (Path(d) / "rviz_setup.log").read_text(encoding="utf-8"))
+
+    def test_cli_entry_points(self):
+        sys.path.insert(0, str(ROOT / "packaging"))
+        import launch_cli
+        self.assertEqual(launch_cli.COMMANDS["setup-rviz"], "mirobot_sketch.rviz_setup")
+        self.assertIn('mirobot-setup-rviz = "mirobot_sketch.rviz_setup:main"',
+                      (ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
