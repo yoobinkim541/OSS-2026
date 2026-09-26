@@ -285,6 +285,83 @@ class MirobotLink:
         self.ser.close()
 
 
+# 실행 단계 (GUI 단계 표시줄과 명령줄 출력이 같은 이름을 씀): (id, 이름, 누가)
+DRAW_STEPS = (("preflight", "사전 검사", "auto"), ("connect", "연결·호밍", "person"),
+              ("start", "시작 위치 확인", "auto"), ("confirm", "최종 확인", "person"),
+              ("drawing", "그리는 중", "auto"), ("done", "끝", "auto"))
+
+
+class DrawError(Exception):
+    """단계에서 멈춤: 어느 단계(step), 무엇이(message), 어떻게 하면 되는지(hint)."""
+
+    def __init__(self, step, message, hint=""):
+        super().__init__(message)
+        self.step, self.message, self.hint = step, message, hint
+
+
+def preflight(strokes, cfg, pending=False, air=False):
+    """① 범위 검사 + 명령 계획 + 시간 추정. 로봇에 연결하기 전."""
+    if not strokes:
+        raise DrawError("preflight", "그릴 획이 없습니다.")
+    bad = check_limits(strokes, cfg, pending)
+    if bad:
+        i, x, y = bad[0]
+        hint = ("그림 크기를 줄이세요." if pending else
+                "그림 크기를 줄이거나, 실물 확인 전 넓은 범위(±60mm)를 쓰려면 '넓은 범위 허용'을 켜세요.")
+        raise DrawError("preflight", f"종이 허용 범위를 벗어난 점 {len(bad)}개 (예: 획 {i}, x={x:.1f}, y={y:.1f} mm)", hint)
+    planner = Planner(cfg, air=air)
+    return {"cmds": planner.plan(strokes), "timing": estimate_time(strokes, cfg), "planner": planner}
+
+
+def open_link(cfg, virtual=False, virtual_speed=20.0, verbose=False):
+    if virtual:
+        from .virtual_robot import VirtualMirobotLink
+        return VirtualMirobotLink(cfg, speed=virtual_speed)
+    try:
+        return MirobotLink.open(cfg["port"], cfg["baud"], verbose)
+    except Exception as e:  # 포트 없음·사용 중 (serial.SerialException 등)
+        raise DrawError("connect", f"포트 {cfg['port']}를 열 수 없습니다: {e}",
+                        "USB 연결과 포트 번호(drawing_config.json의 port)를 확인하고, "
+                        "다른 프로그램이 쓰고 있지 않은지 보세요.") from None
+
+
+def connect_and_home(link, cfg, progress=print, should_cancel=None):
+    """② 호밍 대기 (자동 호밍 명령은 보내지 않음). 반환: TCP."""
+    state, tcp = link.wait_for_homing(cfg["idle_timeout_s"], progress=progress, should_cancel=should_cancel)
+    if state == "cancelled":
+        raise DrawError("connect", "취소했습니다.")
+    if state != "Idle":
+        raise DrawError("connect", f"Idle이 되지 않았습니다 (상태: {state}).",
+                        "로봇 가운데 네비게이션 버튼을 2초 눌러 호밍한 뒤 다시 시작하세요.")
+    if tcp is None:
+        raise DrawError("connect", "TCP 좌표를 읽지 못했습니다.", "연결을 다시 해 보세요.")
+    return tcp
+
+
+def check_start(tcp, cfg):
+    """③ 현재 펜 끝이 설정된 종이 중심 근처인지. 반환: 떨어진 거리(mm)."""
+    c = cfg["paper_center_tcp_mm"]
+    off = ((tcp[0] - c["x"]) ** 2 + (tcp[1] - c["y"]) ** 2 + (tcp[2] - c["z"]) ** 2) ** 0.5
+    if off > cfg["max_start_offset_mm"]:
+        raise DrawError("start", f"펜 끝이 종이 중심 설정에서 {off:.1f} mm 떨어져 있습니다 "
+                                 f"(허용 {cfg['max_start_offset_mm']} mm).",
+                        "호밍 뒤 펜 끝이 종이 가운데에 오도록 종이 위치를 맞추세요.")
+    return off
+
+
+def write_run_record(meta, result, cfg):
+    """⑥ runs/run-<시각>.json. meta: strokes_json, stroke_count, command_count, air_mode, pending_limits,
+    estimated_time, source, virtual, virtual_speed 등."""
+    run_dir = paths.runs_dir()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run = {"started_local": stamp, **meta, "config_snapshot": cfg, **result, "visual_verification": "pending"}
+    path = run_dir / f"run-{stamp}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(run, f, ensure_ascii=False, indent=1)
+    return path
+
+
 def execute(link, cmds, cfg, progress=print, on_ack=None, should_stop=None):
     """계획된 명령을 순서대로 보냅니다. 반환: 실행 결과 dict. 오류·멈춤 시 즉시 멈춥니다(자동 복구 없음).
     on_ack(보낸 수, 전체 수): ok마다 호출 (GUI 진행 표시·RViz 따라가기).
@@ -334,6 +411,8 @@ def main():
     ap.add_argument("--air", action="store_true", help="펜을 대지 않고 펜업 높이로 경로만 따라감")
     ap.add_argument("--pending-limits", action="store_true",
                     help="실물 미확인 확장 범위(limits_pending_verification)로 검사 — 범위 확인 시험 전용")
+    ap.add_argument("--virtual", action="store_true", help="로봇 없이 가상 시뮬레이션으로 실행 (--execute와 함께)")
+    ap.add_argument("--virtual-speed", type=float, default=20.0, help="가상 시뮬레이션 배속")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -346,18 +425,15 @@ def main():
         pl = cfg["limits_pending_verification"]
         print(f"주의: 실물 미확인 확장 범위 ±{pl['max_abs_paper_x_mm']:.0f} x ±{pl['max_abs_paper_y_mm']:.0f} mm로 검사합니다 "
               f"({pl['status']}). 범위 확인 시험에만 쓰세요.")
-    bad = check_limits(strokes, cfg, args.pending_limits)
-    if bad:
-        i, x, y = bad[0]
-        print(f"거부: 종이 허용 범위를 벗어난 점 {len(bad)}개 (예: 획 {i}, x={x:.1f}, y={y:.1f} mm).")
+    try:
+        pre = preflight(strokes, cfg, args.pending_limits, args.air)
+    except DrawError as e:
+        print(f"거부: {e.message}.")
         print("CV 단계에서 --box를 줄이거나 drawing_config.json의 limits를 확인하세요.")
         return 2
-
-    planner = Planner(cfg, air=args.air)
-    cmds = planner.plan(strokes)
+    planner, cmds, timing = pre["planner"], pre["cmds"], pre["timing"]
     if args.air:
         print(f"공중 모드(--air): 펜을 종이에 대지 않습니다 (접촉면에서 {cfg['pen']['up_clearance_mm']} mm 떨어져 이동).")
-    timing = estimate_time(strokes, cfg)
     ys = [planner.robot_yz(x, y)[0] for s in strokes for x, y in s]
     zs = [planner.robot_yz(x, y)[1] for s in strokes for x, y in s]
 
@@ -379,25 +455,24 @@ def main():
         print(f"dry-run: 로봇을 움직이지 않았습니다. G-code 저장: {out}")
         return 0
 
-    link = MirobotLink.open(cfg["port"], cfg["baud"], args.verbose)
+    if args.virtual:
+        print(f"가상 시뮬레이션 {args.virtual_speed:g}배속: 로봇 없이 같은 절차로 실행합니다.")
     try:
-        state, tcp = link.wait_for_homing(cfg["idle_timeout_s"])
-        print(f"컨트롤러 상태: {state}, TCP: {tcp}")
-        if state != "Idle":
-            print("Idle이 되지 않아 시작하지 않습니다.")
-            return 3
-        if tcp is None:
-            print("TCP 좌표를 읽지 못해 시작 위치를 확인할 수 없습니다. 중단합니다.")
-            return 3
-        c = cfg["paper_center_tcp_mm"]
-        off = ((tcp[0] - c["x"]) ** 2 + (tcp[1] - c["y"]) ** 2 + (tcp[2] - c["z"]) ** 2) ** 0.5
-        if off > cfg["max_start_offset_mm"]:
-            print(f"현재 TCP가 종이 중심 설정에서 {off:.1f} mm 떨어져 있습니다. 중단합니다.")
+        link = open_link(cfg, args.virtual, args.virtual_speed, args.verbose)
+    except DrawError as e:
+        print(e.message)
+        return 3
+    try:
+        try:
+            tcp = connect_and_home(link, cfg)
+            print(f"컨트롤러 상태: Idle, TCP: {tcp}")
+            check_start(tcp, cfg)
+        except DrawError as e:
+            print(f"{e.message} 중단합니다." + (f" ({e.hint})" if e.hint else ""))
             return 3
         if input("종이·펜·주변을 확인했으면 yes 입력: ").strip().lower() != "yes":
             print("취소했습니다.")
             return 0
-
         result = execute(link, cmds, cfg)
     finally:
         link.close()
@@ -405,26 +480,12 @@ def main():
     print(f"결과: {result}")
     if result["result"] != "completed":
         print("자동 복구를 하지 않았습니다. 펜과 로봇 상태를 확인한 뒤 수동으로 조치하세요.")
-
-    run_dir = paths.runs_dir()
-    run_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run = {
-        "started_local": stamp,
-        "strokes_json": str(args.strokes_json),
-        "stroke_count": len(strokes),
-        "command_count": len(cmds),
-        "air_mode": args.air,
-        "pending_limits": args.pending_limits,
-        "estimated_time": timing,
-        "config_snapshot": cfg,
-        "source": doc.get("source", {}),
-        **result,
-        "visual_verification": "pending",
-    }
-    with open(run_dir / f"run-{stamp}.json", "w", encoding="utf-8") as f:
-        json.dump(run, f, ensure_ascii=False, indent=1)
-    print(f"실행 기록: {run_dir / f'run-{stamp}.json'} (종이 사진 확인 결과를 visual_verification에 적어두세요)")
+    path = write_run_record({"strokes_json": str(args.strokes_json), "stroke_count": len(strokes),
+                             "command_count": len(cmds), "air_mode": args.air, "pending_limits": args.pending_limits,
+                             "estimated_time": timing, "source": doc.get("source", {}),
+                             "virtual": bool(args.virtual),
+                             "virtual_speed": args.virtual_speed if args.virtual else None}, result, cfg)
+    print(f"실행 기록: {path} (종이 사진 확인 결과를 visual_verification에 적어두세요)")
     return 0 if result["result"] == "completed" else 4
 
 
