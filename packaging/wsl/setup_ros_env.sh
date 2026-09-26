@@ -47,8 +47,8 @@ else
   log "ROS 2 Humble 있음 — 건너뜀"
 fi
 
-# 2) RViz와 모델 빌드에 필요한 것 (소프트웨어 렌더링용 Mesa 포함)
-PKGS="ros-humble-rviz2 ros-humble-robot-state-publisher python3-colcon-common-extensions git libgl1-mesa-dri"
+# 2) RViz와 모델 빌드에 필요한 것 (CMake project()가 C++ 컴파일러를 찾음, 소프트웨어 렌더링용 Mesa 포함)
+PKGS="ros-humble-rviz2 ros-humble-robot-state-publisher python3-colcon-common-extensions g++ git libgl1-mesa-dri"
 MISSING=""
 for p in $PKGS; do installed "$p" || MISSING="$MISSING $p"; done
 if [ -n "$MISSING" ]; then
@@ -73,7 +73,8 @@ fi
 build_model() {
   set -euo pipefail
   WS="$HOME/mirobot_ws"
-  if [ -d "$WS/install/wlkata_mirobot_description" ]; then
+  # 빌드가 실패해도 install/<패키지>/ 폴더는 생기므로, 성공해야만 설치되는 package.xml로 판단
+  if [ -f "$WS/install/wlkata_mirobot_description/share/wlkata_mirobot_description/package.xml" ]; then
     echo "[setup] Mirobot 모델 있음 — 건너뜀"
     return 0
   fi
