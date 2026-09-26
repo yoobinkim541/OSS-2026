@@ -51,6 +51,11 @@ jobs:
           # 에이전트 MCP 서버: 브리지 정보 없이 실행하면 안내 후 종료 코드 2 (모듈 누락이면 1)
           dist\MirobotSketch\mirobot.exe mcp
           if ($LASTEXITCODE -ne 2) { Write-Error "exe에 MCP 서버 모듈이 빠졌습니다 (exit $LASTEXITCODE)"; exit 1 }
+          # 로봇 없이 실행 절차 전체(호밍 → 명령·ok → 기록): 가상 시뮬레이션
+          "yes" | dist\MirobotSketch\mirobot.exe draw trajectories\orientation-test-F.json --execute --virtual --virtual-speed 200
+          if ($LASTEXITCODE -ne 0) { Write-Error "가상 시뮬레이션 실행 실패 (exit $LASTEXITCODE)"; exit 1 }
+          # RViz 따라가기가 WSL에서 불러 쓰는 모듈이 설치판에 들어갔는지
+          if (-not (Test-Path dist\MirobotSketch\_internal\sim\mirobot_sketch\live_progress.py)) { Write-Error "sim/mirobot_sketch/live_progress.py 없음"; exit 1 }
 
       - name: 설치 프로그램 빌드 (Inno Setup)
         run: |
