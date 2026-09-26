@@ -173,6 +173,7 @@ TOOLS = [
     },
 ]
 TOOL_NAMES = {t["name"] for t in TOOLS}
+READ_ONLY_TOOLS = {"get_state", "view", "list_strokes", "get_stroke", "simulate"}   # 그리는 중에도 쓸 수 있는 도구
 
 
 def image_part(img_bgr, max_side=1024):
@@ -200,6 +201,8 @@ class AgentToolbox:
         try:
             if name not in TOOL_NAMES:
                 raise SessionError(f"알 수 없는 도구: {name}")
+            if getattr(self.session, "drawing_lock", False) and name not in READ_ONLY_TOOLS:
+                raise SessionError("로봇이 그리는 중이라 설정·편집을 바꿀 수 없습니다. 끝난 뒤 다시 요청하세요.")
             return getattr(self, "_" + name)(**(args or {})), False
         except SessionError as e:
             return [text_part(f"오류: {e}")], True

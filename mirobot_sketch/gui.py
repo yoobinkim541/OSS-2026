@@ -113,6 +113,8 @@ class SketchApp:
         self._workers = 0              # 돌고 있는 재계산 스레드 수
         self._recompute_after = None   # 예약된 재계산 (after id)
         self._recompute_pending = False  # 에이전트 작업 중 들어온 재계산 요청 (끝나면 실행)
+        self.drawing = False             # 로봇으로 그리는 중 (조절·편집·재계산 잠금)
+        self.draw_window = None
         # 작업 스레드 -> 화면: Tkinter는 스레드에 안전하지 않으므로 작업 스레드는 큐에
         # 할 일만 넣고, 메인 스레드가 주기적으로 꺼내 실행한다.
         self._ui_queue = queue.Queue()
@@ -197,8 +199,9 @@ class SketchApp:
 
         c1 = Card(side, "① 이미지")
         c1.pack(fill="x", pady=(0, 10))
-        ctk.CTkButton(c1, text="이미지 열기", command=self.open_image, font=font(13), height=36,
-                      fg_color=ACCENT).pack(fill="x", padx=14)
+        self.open_btn = ctk.CTkButton(c1, text="이미지 열기", command=self.open_image, font=font(13), height=36,
+                                      fg_color=ACCENT)
+        self.open_btn.pack(fill="x", padx=14)
         self.path_label = ctk.CTkLabel(c1, text="선택된 파일 없음", font=font(11), text_color=MUTED,
                                        wraplength=300, anchor="w", justify="left")
         self.path_label.pack(fill="x", padx=14, pady=(4, 8))
@@ -232,6 +235,9 @@ class SketchApp:
         self.sim_btn = ctk.CTkButton(c3, text="로봇 시뮬레이션 (관절 한계)", command=self.simulate, font=font(13),
                                      height=36, fg_color="transparent", border_width=2, text_color=TEXT)
         self.sim_btn.pack(fill="x", padx=14, pady=3)
+        self.draw_btn = ctk.CTkButton(c3, text="로봇으로 그리기", command=self.open_draw_window, font=font(13, "bold"),
+                                      height=38, fg_color="#16a34a", hover_color="#15803d")
+        self.draw_btn.pack(fill="x", padx=14, pady=3)
         row = ctk.CTkFrame(c3, fg_color="transparent")
         row.pack(fill="x", padx=14, pady=(3, 6))
         ctk.CTkButton(row, text="JSON 내보내기", command=self.export_strokes, font=font(12), height=32,
@@ -328,7 +334,7 @@ class SketchApp:
         self._schedule_recompute()
 
     def _on_param(self, key, value):
-        if self._agent_busy:
+        if self._agent_busy or self.drawing:
             return
         self.session.update_params({key: value})
         self._schedule_recompute()
@@ -455,6 +461,9 @@ class SketchApp:
 
     def _apply_proposals(self, exclude):
         """적용(순서 정하기·미리보기 다시 그리기)은 획이 많으면 오래 걸려 작업 스레드에서."""
+        if self.drawing:
+            messagebox.showinfo("알림", "로봇이 그리는 중에는 편집을 적용할 수 없습니다.")
+            return
         if self._workers == 0:
             self.progress.configure(mode="indeterminate")
             self.progress.start()
@@ -498,16 +507,17 @@ class SketchApp:
             self._show_sim(self.session.sim["summary"])
 
     def agent_busy(self, busy):
-        """에이전트가 작업 중이면 처리·시뮬레이션 버튼을 잠금 (같은 세션을 동시에 바꾸지 않게)."""
+        """에이전트가 작업 중이거나 로봇이 그리는 중이면 처리·조절·시뮬레이션을 잠금 (같은 세션을 동시에 바꾸지 않게)."""
         self._agent_busy = busy
-        state = "disabled" if busy or self.busy else "normal"
+        locked = busy or self.drawing
+        state = "disabled" if locked or self.busy else "normal"
         self.run_btn.configure(state=state)
         self.sim_btn.configure(state=state)
         if self.controls is not None:
-            self.controls.set_enabled(not busy)
+            self.controls.set_enabled(not locked)
         for seg in (self.type_seg, self.detail_seg):
-            seg.configure(state="disabled" if busy else "normal")
-        if not busy and self._recompute_pending:
+            seg.configure(state="disabled" if locked else "normal")
+        if not locked and self._recompute_pending:
             self._recompute_pending = False
             self._schedule_recompute(0)
 
@@ -525,7 +535,7 @@ class SketchApp:
             self.progress.stop()
             self.progress.configure(mode="determinate")
             self.progress.set(0)
-            state = "disabled" if self._agent_busy else "normal"
+            state = "disabled" if self._agent_busy or self.drawing else "normal"
             self.run_btn.configure(state=state)
             self.sim_btn.configure(state=state)
         self._ui(done)
@@ -541,8 +551,8 @@ class SketchApp:
         self._recompute_after = None
         if self.img_path is None:
             return
-        if self._agent_busy:
-            self._recompute_pending = True   # 에이전트가 끝나면 다시 계산
+        if self._agent_busy or self.drawing:
+            self._recompute_pending = True   # 에이전트·드로잉이 끝나면 다시 계산
             return
         self.strip.set_stale(self.session.dirty_stages())
         if self._workers == 0:
@@ -707,7 +717,38 @@ class SketchApp:
             self.agent_panel.grid_remove()
             self.agent_btn.configure(fg_color="transparent", text_color=TEXT)
 
+    # ---------------------------------------------------------------- 로봇으로 그리기
+    def open_draw_window(self, launch_rviz=None):
+        if not self.result:
+            messagebox.showwarning("알림", "먼저 이미지를 처리하세요.")
+            return None
+        if self.draw_window is not None and self.draw_window.winfo_exists():
+            self.draw_window.focus()
+            return self.draw_window
+        from .draw_window import DrawWindow
+        self.draw_window = DrawWindow(self, self.session, self.cfg, font, launch_rviz=launch_rviz)
+        return self.draw_window
+
+    def set_drawing(self, on):
+        """실행 중에는 조절 칸·편집·재계산·에이전트 편집 도구를 잠금 (그리는 획이 바뀌지 않게)."""
+        self.drawing = bool(on)
+        self.session.drawing_lock = self.drawing
+        self.agent_busy(self._agent_busy)
+        self.draw_btn.configure(state="disabled" if self.drawing else "normal")
+        self.open_btn.configure(state="disabled" if self.drawing else "normal")
+        # 메인 'RViz 3D로 보기'는 run_rviz.sh가 떠 있는 따라가기 화면을 정리(pkill)하므로 그리는 중엔 잠금
+        self.traj_btn.configure(state="disabled" if self.drawing or not self.result else "normal")
+        if not self.drawing:
+            self.st_time.set(f"{self.result['timing']['total_s'] / 60:.1f}분" if self.result else "—",
+                             self.st_time.sub.cget("text"))
+
+    def show_draw_progress(self, acked, total):
+        self.st_time.value.configure(text=f"{100 * acked // max(total, 1)}% 진행")
+
     def _on_close(self):
+        if self.draw_window is not None and self.draw_window.winfo_exists():
+            if not self.draw_window.close():
+                return
         if self.agent_panel is not None:
             for b in self.agent_panel.backends.values():
                 b.cancel()

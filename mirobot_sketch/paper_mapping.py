@@ -75,6 +75,8 @@ def pixels_to_paper(strokes_px, box_mm=DEFAULT_BOX_MM, paper_mm=A4_LANDSCAPE_MM,
         "drawing_width_mm": round(float(size[0] * scale), 3),
         "drawing_height_mm": round(float(size[1] * scale), 3),
         "center_px": [round(float(center[0]), 3), round(float(center[1]), 3)],   # mm -> px 역변환용
+        # 반올림하지 않은 변환 (세션의 mm<->px 계산용: 반올림 값을 쓰면 가장자리 점이 허용 범위를 0.0001mm 넘음)
+        "transform": {"scale": float(scale), "cx": float(center[0]), "cy": float(center[1])},
         "alignment": "bounding_box_center_to_paper_center",
     }
     return strokes_mm, placement

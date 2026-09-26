@@ -143,13 +143,16 @@ def pen_tip_offset(cfg):
     return np.array([o["x"], o["y"], o["z"]], dtype=float)
 
 
+_GCODE_F = __import__("re").compile(r"F([\d.]+)")
+
+
 def plan_targets(strokes, cfg):
-    """실행기와 같은 계획 -> [(xyz_mm, 설명, pen_down)]. 시작점은 종이 중심 펜다운(=사용자가 둔 위치)."""
+    """실행기와 같은 계획 -> [(xyz_mm, 설명, pen_down, feed)]. 시작점은 종이 중심 펜다운(=사용자가 둔 위치)."""
     planner = de.Planner(cfg)
-    out = [(np.array(planner.pose(0, 0, True)), "start (pen at paper center)", False)]
+    out = [(np.array(planner.pose(0, 0, True)), "start (pen at paper center)", False, 0.0)]
     for line, label in planner.plan(strokes):
         xyz = np.array([float(v) for v in _GCODE_XYZ.search(line).groups()])
-        out.append((xyz, label, label.endswith(" draw")))
+        out.append((xyz, label, label.endswith(" draw"), float(_GCODE_F.search(line).group(1))))
     return out
 
 
@@ -159,14 +162,17 @@ def simulate(targets, step_mm=1.0):
     samples = []
     failures = []
     prev = targets[0][0]
-    for xyz, label, pen_down in targets:
+    cmd_feed = []   # 명령별 속도 (시작 자세 제외) — 실시간 따라가기의 보간 속도
+    for t, (xyz, label, pen_down, feed) in enumerate(targets):
+        if t > 0:
+            cmd_feed.append(feed)
         n = max(1, int(np.ceil(np.linalg.norm(xyz - prev) / step_mm)))
         for k in range(1, n + 1):
             p = prev + (xyz - prev) * (k / n)
             q, err, ok = ik(p, q)
             if not ok:
                 failures.append({"command": label, "target_mm": p.round(2).tolist(), "pos_error_mm": round(err, 3)})
-            samples.append((q.copy(), p.copy(), label, pen_down))
+            samples.append((q.copy(), p.copy(), label, pen_down, t - 1))   # 마지막 값: G-code 명령 번호
         prev = xyz
 
     qs = np.array([s[0] for s in samples])
@@ -185,6 +191,7 @@ def simulate(targets, step_mm=1.0):
             })
     return {
         "samples": samples,
+        "cmd_feed": cmd_feed,
         "failures": failures,
         "violations": violations,
         "min_margin_deg": np.degrees(margin.min(axis=0)),
@@ -193,14 +200,17 @@ def simulate(targets, step_mm=1.0):
 
 
 def trajectory_doc(result, cfg, source):
-    """시뮬레이션 결과를 RViz 재생용 관절 궤적 문서로 (sim/rviz_playback.py가 읽는 형식)."""
+    """시뮬레이션 결과를 RViz 재생용 관절 궤적 문서로 (sim/rviz_playback.py가 읽는 형식).
+    점마다 cmd = G-code 명령 번호(0부터, 시작 자세는 -1) — 실시간 따라가기가 로봇의 명령 응답과 맞춤."""
     tip = pen_tip_offset(cfg)
     return {
         "joint_names": JOINT_NAMES, "units": "rad", "step_mm": 1.0, "source": str(source),
         "pen_tip_offset_mm": tip.tolist(),
+        "command_count": len(result["cmd_feed"]),
+        "cmd_feed_mm_min": [float(f) for f in result["cmd_feed"]],
         "points": [{"q": [round(float(v), 5) for v in s[0]], "tcp_mm": [round(float(v), 3) for v in s[1]],
                     "pen_tip_mm": [round(float(v), 3) for v in s[1] + tip],
-                    "pen_down": bool(s[3]), "command": s[2]} for s in result["samples"]],
+                    "pen_down": bool(s[3]), "command": s[2], "cmd": int(s[4])} for s in result["samples"]],
     }
 
 

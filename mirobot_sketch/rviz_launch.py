@@ -82,8 +82,9 @@ def find_ros_distro(run=subprocess.run):
     return found
 
 
-def launch(traj_path, speed=20, run=subprocess.run, popen=subprocess.Popen):
-    """RViz 재생을 백그라운드로 시작하고 Popen을 돌려줌. 쓸 수 없으면 RvizUnavailable."""
+def launch(traj_path, speed=20, follow=None, run=subprocess.run, popen=subprocess.Popen):
+    """RViz 재생을 백그라운드로 시작하고 Popen을 돌려줌. 쓸 수 없으면 RvizUnavailable.
+    follow=진행 파일이면 반복 재생 대신 로봇 진행을 실시간으로 따라감."""
     if sys.platform != "win32":
         raise RvizUnavailable("RViz 창 열기는 Windows + WSL에서만 지원합니다. Linux에서는 sim/run_rviz.sh를 직접 실행하세요.")
     sdir = scripts_dir()
@@ -93,6 +94,8 @@ def launch(traj_path, speed=20, run=subprocess.run, popen=subprocess.Popen):
     if not distro:
         raise RvizUnavailable(SETUP_HINT)
     cmd = f"bash {shlex.quote(to_wsl_path(sdir / 'run_rviz.sh'))} {shlex.quote(to_wsl_path(traj_path))} {float(speed):g}"
+    if follow is not None:
+        cmd += f" {shlex.quote(to_wsl_path(follow))}"
     log = open(paths.output_dir() / "rviz_launch.log", "w", encoding="utf-8")
     try:
         return popen(["wsl.exe", "-d", distro, "--", "bash", "-lc", cmd], stdout=log, stderr=subprocess.STDOUT,

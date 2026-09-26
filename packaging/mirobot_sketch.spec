@@ -16,6 +16,9 @@ datas = collect_data_files("customtkinter") + collect_data_files("mirobot_sketch
 # GUI의 "RViz 3D로 보기"가 WSL에서 실행하는 스크립트 (ROS가 설치된 PC에서만 동작)
 datas += [(str(ROOT / "sim" / "run_rviz.sh"), "sim"), (str(ROOT / "sim" / "rviz_playback.py"), "sim"),
           (str(ROOT / "sim" / "rviz" / "mirobot_sketch.rviz"), "sim/rviz")]
+# RViz 따라가기가 WSL 파이썬에서 불러 쓰는 모듈 (표준 라이브러리만 씀)
+datas += [(str(ROOT / "mirobot_sketch" / "__init__.py"), "sim/mirobot_sketch"),
+          (str(ROOT / "mirobot_sketch" / "live_progress.py"), "sim/mirobot_sketch")]
 excludes = ["rembg", "onnxruntime", "torch", "PyQt5", "PyQt6", "PySide6", "IPython", "jupyter", "pytest"]
 
 

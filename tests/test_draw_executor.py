@@ -4,6 +4,7 @@
 """
 
 import copy
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -184,6 +185,47 @@ class OrientationTestFileTest(unittest.TestCase):
         _, strokes = de.load_strokes(path)
         self.assertEqual(len(strokes), 2)
         self.assertFalse(de.check_limits(strokes, CFG))
+
+
+class StepFunctionsTest(unittest.TestCase):
+    def test_draw_steps_order(self):
+        self.assertEqual([s[0] for s in de.DRAW_STEPS], ["preflight", "connect", "start", "confirm", "drawing", "done"])
+
+    def test_preflight_rejects_out_of_range_with_hint(self):
+        far = [[(0.0, 0.0), (58.0, 0.0)]]
+        with self.assertRaises(de.DrawError) as cm:
+            de.preflight(far, CFG)
+        self.assertEqual(cm.exception.step, "preflight")
+        self.assertIn("넓은 범위", cm.exception.hint)
+        self.assertTrue(de.preflight(far, CFG, pending=True)["cmds"])
+
+    def test_connect_and_check_start_with_virtual_link(self):
+        from mirobot_sketch.virtual_robot import VirtualMirobotLink
+        link = VirtualMirobotLink(CFG, homing_s=0.01)
+        tcp = de.connect_and_home(link, CFG, progress=lambda *_: None)
+        de.check_start(tcp, CFG)
+        bad = VirtualMirobotLink(CFG, homing_s=0.01, start_offset_mm=9.0)
+        with self.assertRaises(de.DrawError) as cm:
+            de.check_start(de.connect_and_home(bad, CFG, progress=lambda *_: None), CFG)
+        self.assertEqual(cm.exception.step, "start")
+        with self.assertRaises(de.DrawError) as cm:
+            de.connect_and_home(VirtualMirobotLink(CFG, homing_s=5), CFG, progress=lambda *_: None,
+                                should_cancel=lambda: True)
+        self.assertEqual(cm.exception.step, "connect")
+
+    def test_cli_virtual_run_writes_record(self):
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            doc = Path(d) / "s.json"
+            doc.write_text(json.dumps({"kind": "sketch_strokes", "units": "mm", "strokes": [
+                {"points_xy_mm": [[-5, -5], [5, -5], [5, 5]]}]}), encoding="utf-8")
+            with mock.patch.object(de.paths, "runs_dir", lambda: Path(d) / "runs"),                     mock.patch("builtins.input", return_value="yes"),                     mock.patch.object(sys, "argv", ["mirobot-draw", str(doc), "--execute", "--virtual",
+                                                    "--virtual-speed", "200"]):
+                self.assertEqual(de.main(), 0)
+            rec = json.loads(next((Path(d) / "runs").glob("run-*.json")).read_text(encoding="utf-8"))
+            self.assertTrue(rec["virtual"])
+            self.assertEqual(rec["result"], "completed")
 
 
 if __name__ == "__main__":

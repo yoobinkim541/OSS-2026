@@ -136,6 +136,13 @@ class SessionTest(SessionTestBase):
             eh, ew = s.render("edit").shape[:2]      # 편집 그림은 에이전트용으로 확대(최대 1000px), 비율은 같음
             self.assertAlmostEqual(eh / ew, h / w, delta=0.01)
 
+    def test_default_box_fits_executor_limits_exactly(self):
+        s = self.new_session()                 # 기본 그림 크기 100mm = 실행기 허용 범위(±50mm)와 같음
+        lim = s.cfg["limits"]["max_abs_paper_x_mm"]
+        worst = max(float(np.abs(np.asarray(st)).max()) for st in s.result["strokes_mm"])
+        self.assertLessEqual(worst, lim + 1e-6)        # 반올림된 배율·중심 때문에 가장자리가 넘치면 안 됨
+        self.assertEqual(s.result["out_of_limits"], 0)
+
     def test_stage_summaries_show_what_each_stage_produced(self):
         s = self.new_session()
         sm = s.stage_summaries()
@@ -550,6 +557,18 @@ class ToolboxTest(SessionTestBase):
         tb = AgentToolbox(self.new_session())
         out = json.loads(tb.call("set_params", {"epsilon_px": 2.2})[0][0]["text"])
         self.assertEqual(out["recomputed"], ["simplify", "edit", "paper"])
+
+    def test_tools_are_read_only_while_robot_draws(self):
+        s = self.new_session()
+        tb = AgentToolbox(s)
+        s.drawing_lock = True
+        parts, err = tb.call("set_params", {"epsilon_px": 2.0})
+        self.assertTrue(err)
+        self.assertIn("그리는 중", parts[0]["text"])
+        for name, args in (("get_state", {}), ("view", {"kind": "paper"}), ("list_strokes", {})):
+            self.assertFalse(tb.call(name, args)[1], name)
+        s.drawing_lock = False
+        self.assertFalse(tb.call("set_params", {"epsilon_px": 2.0})[1])
 
     def test_set_params_notifies_screen(self):
         changes = []

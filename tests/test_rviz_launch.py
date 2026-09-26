@@ -54,6 +54,25 @@ class RvizLaunchTest(unittest.TestCase):
         self.assertEqual(argv[:4], ["wsl.exe", "-d", "Ubuntu-22.04", "--"])
         self.assertEqual(argv[-1], "bash /mnt/c/run_rviz.sh '/mnt/c/my traj.json' 20")   # 공백 경로는 따옴표
 
+    def test_launch_follow_mode_passes_progress_path(self):
+        popen = mock.Mock()
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(rl.sys, "platform", "win32"), mock.patch.object(rl, "_no_window", lambda: 0), \
+                mock.patch.object(rl.paths, "output_dir", lambda: Path(d)), \
+                mock.patch.object(rl, "to_wsl_path", lambda p: "/mnt/c/" + Path(p).name):
+            rl.launch(Path(d) / "t.json", speed=1, follow=Path(d) / "live.json",
+                      run=fake_run("Ubuntu-22.04"), popen=popen)
+        self.assertEqual(popen.call_args.args[0][-1], "bash /mnt/c/run_rviz.sh /mnt/c/t.json 1 /mnt/c/live.json")
+
+    def test_playback_script_supports_follow(self):
+        src = (rl.scripts_dir() / "rviz_playback.py").read_text(encoding="utf-8")
+        self.assertIn("--follow", src)
+        self.assertIn("FollowTrack", src)
+        sh = (rl.scripts_dir() / "run_rviz.sh").read_text(encoding="utf-8")
+        self.assertIn("--follow", sh)
+        self.assertIn("PYTHONPATH", sh)
+        self.assertNotIn("\r\n", sh)
+
     def test_repo_ships_the_scripts(self):
         d = rl.scripts_dir()
         for f in ("run_rviz.sh", "rviz_playback.py", "rviz/mirobot_sketch.rviz"):
@@ -63,12 +82,13 @@ class RvizLaunchTest(unittest.TestCase):
     def test_trajectory_doc_matches_playback_format(self):
         cfg = {"pen": {"pen_tip_offset_mm": [100, 0, 0]}}
         with mock.patch.object(ms, "pen_tip_offset", lambda c: __import__("numpy").array([100.0, 0, 0])):
-            doc = ms.trajectory_doc({"samples": [([0.0] * 6, __import__("numpy").array([200.0, 0, 230]), "G01", 1)]},
-                                    cfg, "x.png")
+            doc = ms.trajectory_doc({"samples": [([0.0] * 6, __import__("numpy").array([200.0, 0, 230]), "G01", 1, 0)],
+                                     "cmd_feed": [1000.0]}, cfg, "x.png")
         p = doc["points"][0]
         self.assertEqual(p["pen_tip_mm"], [300.0, 0.0, 230.0])
         self.assertTrue(p["pen_down"])
         self.assertEqual(len(doc["joint_names"]), 6)
+        self.assertEqual((p["cmd"], doc["command_count"]), (0, 1))
 
 
 class SourceCompilesTest(unittest.TestCase):
