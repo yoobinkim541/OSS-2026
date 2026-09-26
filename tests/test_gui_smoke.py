@@ -314,11 +314,12 @@ class GuiSmokeTest(unittest.TestCase):
                     def is_alive(self):
                         return True
 
+                real_timeout = w.close_timeout
                 w.job, w.close_timeout = Stuck(), 0.1
                 self.assertFalse(w.close())                           # 안 닫고 잠금 유지
                 self.assertTrue(w.winfo_exists())
                 self.assertTrue(app.drawing)
-                w.job = real_job
+                w.job, w.close_timeout = real_job, real_timeout   # 실제 작업은 멈출 시간을 줌 (느린 CI에서 0.1초는 모자람)
                 self.assertTrue(w.close())
                 self.assertFalse(app.drawing)
 
