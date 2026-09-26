@@ -263,7 +263,8 @@ class SketchApp:
         right.grid(row=1, column=1, sticky="nsew", padx=(8, 18), pady=(0, 18))
         right.grid_columnconfigure(0, weight=1)
         right.grid_rowconfigure(1, weight=1)
-        self.strip = StageStrip(right, stages.ALL_STAGES, self.select_stage, font)
+        self.strip = StageStrip(right, stages.ALL_STAGES, self.select_stage, font,
+                                titles={st.id: stages.stage_title(st.id) for st in stages.ALL_STAGES})
         self.strip.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         self.view_card = Card(right)
         self.view_card.grid(row=1, column=0, sticky="nsew")
@@ -367,21 +368,33 @@ class SketchApp:
     def _show_stage(self):
         s = self.session
         st = stages.STAGE_BY_ID[self.stage_id]
+        title = stages.stage_title(self.stage_id)
+        change = s.stage_change(self.stage_id)
+        self.view.set_info(st.desc + (f"\n{change}" if change else ""), self._compare_target())
         if s.result is None:
             if s.color is not None:
-                self.view.show(f"{st.label} (계산 전)", s.color)
+                self.view.show(f"{title} (계산 전)", s.color)
             return
         overlay = None if self.stage_id in ("source", "paper") else s.color
         if self.stage_id == "edit":
             blank = np.full((*s.result["base"].shape, 3), 255, np.uint8)
-            self.view.show("편집 (빨강=사라짐 · 초록=생김)", blank, overlay, draw_extra=self._draw_edit)
+            self.view.show(f"{title} (빨강=사라짐 · 초록=생김)", blank, overlay, draw_extra=self._draw_edit)
         else:
-            self.view.show(st.label, s.render(self.stage_id), overlay)
+            self.view.show(title, s.render(self.stage_id), overlay)
         # 번호·버린 선 체크박스는 편집 단계에서만 보임
         if self.stage_id == "edit":
             self.view.options_frame.pack(side="right", padx=8)
         else:
             self.view.options_frame.pack_forget()
+
+    def _compare_target(self):
+        """이전 단계 (제목, 그림 함수). 그림 크기가 같은 단계끼리만 (원본·종이는 비교 없음)."""
+        ids = [st.id for st in stages.ALL_STAGES]
+        k = ids.index(self.stage_id)
+        if self.session.result is None or k == 0 or self.stage_id == "paper":
+            return None
+        prev = ids[k - 1]
+        return stages.stage_title(prev), lambda: self.session.render(prev)
 
     def _draw_edit(self, ax):
         """편집 단계 벡터 그림. 선은 색마다 LineCollection 하나로(제안이 수천 개여도 빠르게), 번호 딱지는
@@ -574,6 +587,7 @@ class SketchApp:
         self.traj_btn.configure(state="normal")
         for st in stages.ALL_STAGES:
             self.strip.set_thumbnail(st.id, self.session.render(st.id))
+        self.strip.set_summaries(self.session.stage_summaries())
         self._show_stage()
         t, pl = r["timing"], r["placement"]
         self.st_strokes.set(f"{t['stroke_count']}획", f"명령 {t['command_count']}개")
