@@ -190,6 +190,10 @@ class ControllerError(RuntimeError):
     pass
 
 
+class StopRequested(Exception):
+    """사용자가 [멈춤]을 눌러 다음 명령을 보내지 않음."""
+
+
 class MirobotLink:
     """시리얼 연결을 한 번만 열고 재사용합니다. ser는 테스트용 가짜 객체로 바꿀 수 있습니다."""
 
@@ -238,8 +242,9 @@ class MirobotLink:
             time.sleep(0.5)
         raise ControllerError("Idle 대기 시간 초과")
 
-    def send_and_ack(self, line, timeout):
-        """한 줄을 보내고 ok를 기다립니다. 오류 응답이나 타임아웃이면 ControllerError."""
+    def send_and_ack(self, line, timeout, should_stop=None):
+        """한 줄을 보내고 ok를 기다립니다. 오류 응답이나 타임아웃이면 ControllerError.
+        should_stop은 받기만 함: 실제 로봇은 이미 보낸 명령을 도중에 멈추지 않음 (다음 명령부터 안 보냄)."""
         self.ser.write((line + "\r\n").encode("ascii"))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -255,14 +260,16 @@ class MirobotLink:
                 return
         raise ControllerError(f"ok 응답 시간 초과: {line}")
 
-    def wait_for_homing(self, timeout, progress=print):
+    def wait_for_homing(self, timeout, progress=print, should_cancel=None):
         """포트를 열면 보드가 리셋돼 Alarm으로 시작합니다. 사용자가 물리 버튼으로
         호밍해 Idle이 될 때까지 기다립니다 (자동 호밍 명령은 보내지 않음).
-        반환: (상태, TCP). 시간 안에 Idle이 안 되면 마지막 상태를 그대로 반환."""
+        반환: (상태, TCP). 시간 안에 Idle이 안 되면 마지막 상태를 그대로 반환. 취소하면 ("cancelled", None)."""
         deadline = time.monotonic() + timeout
         last = None
         state, tcp = "unknown", None
         while time.monotonic() < deadline:
+            if should_cancel and should_cancel():
+                return "cancelled", None
             state, tcp, _ = self.query_status()
             if state != last:
                 progress(f"  컨트롤러 상태: {state}")
@@ -278,18 +285,31 @@ class MirobotLink:
         self.ser.close()
 
 
-def execute(link, cmds, cfg, progress=print):
-    """계획된 명령을 순서대로 보냅니다. 반환: 실행 결과 dict. 오류 시 즉시 멈춥니다."""
+def execute(link, cmds, cfg, progress=print, on_ack=None, should_stop=None):
+    """계획된 명령을 순서대로 보냅니다. 반환: 실행 결과 dict. 오류·멈춤 시 즉시 멈춥니다(자동 복구 없음).
+    on_ack(보낸 수, 전체 수): ok마다 호출 (GUI 진행 표시·RViz 따라가기).
+    should_stop(): True면 다음 명령부터 보내지 않음 (가상 시뮬레이션은 기다리는 중에도 바로 멈춤)."""
     started = time.monotonic()
     sent = 0
+    stop = should_stop or (lambda: False)
     try:
         for i, (line, label) in enumerate(cmds):
-            link.send_and_ack(line, cfg["ack_timeout_s"])
+            if stop():
+                raise StopRequested()
+            if should_stop:
+                link.send_and_ack(line, cfg["ack_timeout_s"], should_stop=stop)
+            else:   # 예전 방식의 연결 객체(테스트의 가짜 시리얼 등)와 호환
+                link.send_and_ack(line, cfg["ack_timeout_s"])
             sent = i + 1
+            if on_ack:
+                on_ack(sent, len(cmds))
             if label.endswith("pen-down") or i == len(cmds) - 1:
                 progress(f"  [{sent}/{len(cmds)}] {label}")
         link.wait_idle(cfg["idle_timeout_s"])
         return {"result": "completed", "commands_sent": sent, "elapsed_s": round(time.monotonic() - started, 1)}
+    except StopRequested:
+        return {"result": "stopped_by_user", "commands_sent": sent,
+                "elapsed_s": round(time.monotonic() - started, 1)}
     except ControllerError as e:
         return {"result": "stopped_on_error", "error": str(e), "commands_sent": sent,
                 "failed_command": cmds[sent][1] if sent < len(cmds) else None,
