@@ -345,16 +345,16 @@ def reach_map(cfg, half_y=150, half_z=110, step=10, path=None):
                        extent=[ys[0] - step / 2, ys[-1] + step / 2, zs[0] - step / 2, zs[-1] + step / 2])
         ax.contour(ys, zs, np.nan_to_num(grid, nan=-99), levels=[0, WARN_MARGIN_DEG], colors=["k", "k"],
                    linestyles=["-", "--"])
-        lim = cfg["limits"]
+        from .limits import executor_region, pending_region
         sy = cfg["paper_x_to_robot_y_sign"]
-        ax.add_patch(plt.Rectangle((-lim["max_abs_paper_x_mm"], -lim["max_abs_paper_y_mm"]),
-                                   2 * lim["max_abs_paper_x_mm"], 2 * lim["max_abs_paper_y_mm"],
-                                   fill=False, ec="#1f5fbf", lw=2))
+        for region, color in ((executor_region(cfg), "#1f5fbf"), (pending_region(cfg), "#e67e00")):
+            o = np.array(region.outline())                      # 종이 x -> 로봇 dY(부호), 종이 y -> dZ
+            ax.plot(o[:, 0] * sy, o[:, 1], color=color, lw=2)
         ax.add_patch(plt.Rectangle((-148.5, -105), 297, 210, fill=False, ec="#666", ls=":"))
         ax.set_xlabel("robot dY from paper center (mm)" + ("  [paper right = -Y]" if sy < 0 else ""))
         ax.set_ylabel("robot dZ from paper center (mm)")
         ax.set_title("Min joint-limit margin on paper plane (deg). black: limit, dashed: 5 deg\n"
-                     "blue: executor limits, dotted: A4", fontsize=9)
+                     "blue: executor limits, orange: wide range (unverified), dotted: A4", fontsize=9)
         fig.colorbar(im, ax=ax, label="deg (blank = unreachable)")
         fig.tight_layout()
         fig.savefig(path, dpi=110)

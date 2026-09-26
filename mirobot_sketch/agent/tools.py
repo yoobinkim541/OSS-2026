@@ -34,7 +34,7 @@ SYSTEM_PROMPT = """당신은 사진을 로봇 팔(WLKATA Mirobot)이 펜으로 �
 - 점 편집(move_point 등)은 get_stroke로 점 번호와 좌표를 확인한 뒤에 하세요.
 - 설정을 바꿔 다시 계산하면 번호가 새로 매겨지고 적용 전 제안은 취소됩니다(적용한 편집은 유지).
   설정을 먼저 정하고 편집은 마지막에 하세요.
-- 좌표는 종이 중심이 원점인 mm이며 x는 오른쪽, y는 위쪽이 +입니다. ±60mm 밖은 거부됩니다.
+- 좌표는 종이 중심이 원점인 mm이며 x는 오른쪽, y는 위쪽이 +입니다. 허용 범위(state의 pending_limit_outline_mm) 밖은 거부됩니다.
 
 처리 단계 (view의 kind로 각 단계 결과를 볼 수 있음)
 - source 원본: rembg(배경 제거), frame(구도: auto 자동 / full 전체 / bust 상반신 / face 얼굴.
