@@ -136,6 +136,21 @@ class SessionTest(SessionTestBase):
             eh, ew = s.render("edit").shape[:2]      # 편집 그림은 에이전트용으로 확대(최대 1000px), 비율은 같음
             self.assertAlmostEqual(eh / ew, h / w, delta=0.01)
 
+    def test_stage_summaries_show_what_each_stage_produced(self):
+        s = self.new_session()
+        sm = s.stage_summaries()
+        self.assertEqual(list(sm), [st.id for st in stages.ALL_STAGES])
+        o = s.result["stages"]
+        self.assertIn(f"획 {len(o['trace']['strokes'])}", sm["trace"])
+        self.assertIn(f"버림 {len(o['trace']['discarded_trace'])}", sm["trace"])
+        self.assertIn(f"경계 {int((o['edges']['edges'] > 0).sum()):,}px", sm["edges"])
+        self.assertIn("분", sm["paper"])
+        # 이전 단계 대비 변화: "이전 → 지금"
+        ch = s.stage_change("dedupe")
+        self.assertIn("→", ch)
+        self.assertIn(sm["trace"].split(" · ")[0], ch)
+        self.assertEqual(s.stage_change("source"), "")
+
     def test_state_lists_stages_with_values(self):
         st = self.new_session().state()
         ids = [x["id"] for x in st["stages"]]
