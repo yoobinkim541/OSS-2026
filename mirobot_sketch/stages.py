@@ -1,7 +1,7 @@
 """
 단계별 선 추출 파이프라인
 =========================
-원본 → 전처리 → 선 검출 → 뼈대·획 → 겹침 제거 → 이어 붙이기 → 단순화
+원본 → 전처리 → 선 검출 → 뼈대·획 → 겹침 제거 → 이어 붙이기 → 스무딩·단순화
 각 단계는 조절 항목(ParamSpec), 계산(run), 미리보기(preview)를 가집니다. GUI의 조절 칸과
 에이전트 도구 설명은 이 정의에서 만들어집니다. Pipeline은 단계별 결과를 캐시해 두고
 설정이 바뀐 첫 단계부터만 다시 계산합니다. (편집·순서·종이 배치는 session.py가 이어서 처리)
@@ -133,7 +133,9 @@ def _run_merge(prev, p):
 
 
 def _run_simplify(prev, p):
-    return {**prev, "strokes": sp.simplify_strokes(prev["strokes"], p["epsilon_px"])}
+    st = sp.smooth_strokes(prev["strokes"], p["smooth_sigma_px"])
+    st = sp.simplify_strokes(st, p["epsilon_px"])
+    return {**prev, "strokes": sp.round_corners(st, int(p["round_iters"]))}
 
 
 EDGE_MODES = (("luma", "밝기"), ("lab", "색 차이"), ("dark", "어두운 선"))
@@ -167,9 +169,13 @@ STAGES = (
         ParamSpec("merge_join_px", "연결 거리 (px, 0=끔)", "float", presets.DEFAULT_MERGE_JOIN_PX, 0, 8, 0.5,
                   help="끝점이 이 거리 안이면 펜을 떼지 않고 이어 그림"),),
         _run_merge, lambda o: draw_strokes_colored(o["strokes"], o["gray"].shape)),
-    Stage("simplify", "단순화", (
+    Stage("simplify", "스무딩·단순화", (
+        ParamSpec("smooth_sigma_px", "스무딩 세기 (px, 0=끔)", "float", 2.0, 0, 5.0, 0.5,
+                  help="픽셀 계단·흔들림을 없앰. 클수록 매끄럽지만 작은 모양이 둥글어짐"),
         ParamSpec("epsilon_px", "단순화 오차 (px)", "float", _hi[3], 0.5, 5.0, 0.1,
-                  help="클수록 점·명령 수가 줄지만 곡선이 거칠어짐"),),
+                  help="클수록 점·명령 수가 줄지만 곡선이 거칠어짐"),
+        ParamSpec("round_iters", "모서리 둥글리기 (회, 0=끔)", "int", 1, 0, 3,
+                  help="꺾인 곳을 둥글게. 1회마다 점·명령 수가 약 2배"),),
         _run_simplify, lambda o: draw_strokes_colored(o["strokes"], o["gray"].shape)),
 )
 ALL_STAGES = STAGES + (
@@ -184,7 +190,7 @@ _DESCS = {
     "trace": "두께 있는 경계를 1px 중심선으로 만들고, 이어진 선마다 획 하나로 따라감",
     "dedupe": "굵은 선의 양쪽 경계가 두 줄로 잡힌 이중선을 하나로 줄임",
     "merge": "끝이 닿는 획을 이어 펜을 드는 횟수를 줄임",
-    "simplify": "곡선 모양은 유지하며 점 수(= 로봇 명령 수)를 줄임",
+    "simplify": "선을 매끄럽게 다듬고(계단·지그재그 제거), 모양은 유지하며 점 수(= 로봇 명령 수)를 줄임",
     "edit": "번호 붙은 최종 획. 살리기·지우기·점 편집 제안을 확인하고 적용",
     "paper": "그리는 순서를 정해 A4 위에 배치하고 시간을 추정",
 }
