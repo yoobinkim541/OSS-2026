@@ -1,7 +1,7 @@
 """
 단계별 선 추출 파이프라인
 =========================
-원본 → 전처리 → 선 검출 → 뼈대·획 → 겹침 제거 → 이어 붙이기 → 스무딩·단순화
+원본 → 전처리 → 선 검출 → 뼈대·획 → 겹침 제거 → 이어 붙이기 → 얼굴 세밀 → 스무딩·단순화
 각 단계는 조절 항목(ParamSpec), 계산(run), 미리보기(preview)를 가집니다. GUI의 조절 칸과
 에이전트 도구 설명은 이 정의에서 만들어집니다. Pipeline은 단계별 결과를 캐시해 두고
 설정이 바뀐 첫 단계부터만 다시 계산합니다. (편집·순서·종이 배치는 session.py가 이어서 처리)
@@ -14,6 +14,7 @@ from typing import Callable
 import cv2
 import numpy as np
 
+from . import faces as fc
 from . import presets
 from . import sketch_pipeline as sp
 
@@ -57,6 +58,7 @@ class Stage:
     run: Callable = None      # run(prev: dict, p: dict) -> dict (prev를 이어받아 새 값을 더함)
     preview: Callable = None  # preview(out: dict) -> BGR 이미지 (입력과 같은 크기)
     desc: str = ""            # 이 단계가 하는 일 (한 줄, 화면 안내용)
+    deps: tuple = ()          # 다른 단계의 설정 중 이 단계 계산에도 쓰는 것 (캐시 키에 포함)
 
 
 class StaleRun(Exception):
@@ -132,6 +134,62 @@ def _run_merge(prev, p):
     return {**prev, "strokes": sp.merge_strokes(prev["strokes"], p["merge_join_px"])}
 
 
+FACE_REASON = "얼굴 세밀 처리로 교체"
+GREEN = (40, 160, 40)
+
+
+def _face_strokes(crop, face, p, pen_px):
+    """얼굴 조각(원본 해상도)에서 다시 찾은 획을 작업 좌표로. 펜 굵기보다 촘촘한 선은 합치고,
+    펜 굵기 3배보다 짧은 선은 눈·코·입 근처가 아니면 버림 (계산은 촘촘한 조각 좌표에서)."""
+    img, s, origin = crop["img"], crop["scale"], crop["origin"]
+    q = {**p, "canny_low": p["canny_low"] * p["face_sensitivity"], "canny_high": p["canny_high"] * p["face_sensitivity"]}
+    sub = {"gray": cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), "color": img}
+    for run in (_run_prep, _run_edges, _run_trace, _run_dedupe, _run_merge):
+        sub = run(sub, q)
+    if not sub["strokes"]:
+        return []
+    pen = pen_px * s
+    lm = (face.landmarks - origin) * s
+    keep_r = 0.2 * face.box[2] * s
+    out = []
+    for t in sp.dedupe_strokes(sub["strokes"], img.shape, max(1, int(round(pen)))):
+        t = np.asarray(t, np.float64)
+        near = np.min(np.linalg.norm(t[:, None, :] - lm[None, :, :], axis=2)) <= keep_r
+        if near or sp.polyline_length(t) >= 3 * pen:
+            out.append(t / s + origin)
+    return out
+
+
+def _run_face(prev, p):
+    found = prev.get("faces") or []
+    if not found or not p["face_detail"]:
+        return {**prev, "discarded_face": [], "faces_used": 0, "uses_deps": False}
+    h, w = prev["gray"].shape[:2]
+    pen_px = p["pen_mm"] / (p["box_mm"] / max(h, w))
+    strokes, gone = list(prev["strokes"]), []
+    for face, crop in zip(found, prev["face_crops"]):
+        center, axes = fc.ellipse_of(face)
+        fine = _face_strokes(crop, face, p, pen_px)
+        gone += [(q, FACE_REASON) for q in sp.clip_to_ellipse(strokes, center, axes, inside=True)]
+        strokes = (sp.clip_to_ellipse(strokes, center, axes, inside=False)
+                   + sp.clip_to_ellipse(fine, center, axes, inside=True))
+    return {**prev, "strokes": strokes, "discarded_face": gone, "faces_used": len(found)}
+
+
+def _preview_face(o):
+    img = draw_strokes_colored(o["strokes"], o["gray"].shape, o.get("discarded_face", ()))
+    found = o.get("faces") or []
+    for f in found:
+        (cx, cy), (ax, ay) = fc.ellipse_of(f)
+        cv2.ellipse(img, (int(round(cx)), int(round(cy))), (int(round(ax)), int(round(ay))), 0, 0, 360, GREEN, 1,
+                    cv2.LINE_AA)
+        for x, y in f.landmarks:
+            cv2.circle(img, (int(round(x)), int(round(y))), 2, GREEN, -1)
+    if not found:
+        cv2.putText(img, "no face", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (120, 120, 120), 1, cv2.LINE_AA)
+    return img
+
+
 def _run_simplify(prev, p):
     st = sp.smooth_strokes(prev["strokes"], p["smooth_sigma_px"])
     st = sp.simplify_strokes(st, p["epsilon_px"])
@@ -172,6 +230,16 @@ STAGES = (
         ParamSpec("merge_join_px", "연결 거리 (px, 0=끔)", "float", presets.DEFAULT_MERGE_JOIN_PX, 0, 8, 0.5,
                   help="끝점이 이 거리 안이면 펜을 떼지 않고 이어 그림"),),
         _run_merge, lambda o: draw_strokes_colored(o["strokes"], o["gray"].shape)),
+    Stage("face", "얼굴 세밀", (
+        ParamSpec("face_detail", "얼굴 세밀 처리", "bool", True,
+                  help="사진에서 찾은 얼굴을 원본 해상도로 다시 처리 (얼굴이 없으면 그대로)"),
+        ParamSpec("face_sensitivity", "얼굴 선 민감도", "float", 0.6, 0.3, 1.0, 0.05,
+                  help="얼굴 부분 Canny 기준에 곱함. 낮을수록 약한 선(눈매·입술)도 잡음"),
+        ParamSpec("pen_mm", "펜 굵기 (mm)", "float", 0.5, 0.2, 1.5, 0.05,
+                  help="이보다 촘촘한 얼굴 선은 합침 (종이 크기에 맞춰 자동 환산)")),
+        _run_face, _preview_face,
+        deps=("box_mm", "median_ksize", "blur_ksize", "edge_mode", "canny_low", "canny_high",
+              "min_length_px", "spur_px", "dedupe_px", "merge_join_px")),
     Stage("simplify", "스무딩·단순화", (
         ParamSpec("smooth_sigma_px", "스무딩 세기 (px, 0=끔)", "float", 2.0, 0, 5.0, 0.5,
                   help="픽셀 계단·흔들림을 없앰. 클수록 매끄럽지만 작은 모양이 둥글어짐"),
@@ -193,6 +261,7 @@ _DESCS = {
     "trace": "두께 있는 경계를 1px 중심선으로 만들고, 이어진 선마다 획 하나로 따라감",
     "dedupe": "굵은 선의 양쪽 경계가 두 줄로 잡힌 이중선을 하나로 줄임",
     "merge": "끝이 닿는 획을 이어 펜을 드는 횟수를 줄임",
+    "face": "사진 속 얼굴을 원본 해상도로 다시 따라가, 펜 굵기에 맞는 밀도로 바꿔 넣음 (초록 = 얼굴 영역·눈코입)",
     "simplify": "선을 매끄럽게 다듬고(계단·지그재그 제거), 모양은 유지하며 점 수(= 로봇 명령 수)를 줄임",
     "edit": "번호 붙은 최종 획. 살리기·지우기·점 편집 제안을 확인하고 적용",
     "paper": "그리는 순서를 정해 A4 위에 배치하고 시간을 추정",
@@ -207,7 +276,7 @@ PARAM_SPECS = {p.key: p for s in ALL_STAGES for p in s.params}
 def stage_title(stage_id):
     """번호 붙은 단계 이름 (예: "④ 뼈대·획")."""
     k = next(i for i, st in enumerate(ALL_STAGES) if st.id == stage_id)
-    return f"{'①②③④⑤⑥⑦⑧⑨'[k]} {ALL_STAGES[k].label}"
+    return f"{'①②③④⑤⑥⑦⑧⑨⑩'[k]} {ALL_STAGES[k].label}"
 
 
 def default_params():
@@ -217,7 +286,8 @@ def default_params():
 def candidates_of(outputs):
     """버린 조각 전부: [(점 배열, 이유)]."""
     last = outputs["simplify"]
-    return list(last.get("discarded_trace", [])) + list(last.get("discarded_dedupe", []))
+    return (list(last.get("discarded_trace", [])) + list(last.get("discarded_dedupe", []))
+            + list(last.get("discarded_face", [])))
 
 
 class Pipeline:
@@ -230,26 +300,42 @@ class Pipeline:
 
     @staticmethod
     def _stage_params(stage, params):
-        return {spec.key: params[spec.key] for spec in stage.params}
+        p = {spec.key: params[spec.key] for spec in stage.params}
+        p.update({k: params[k] for k in stage.deps})
+        return p
 
-    def _keys(self, input_key, params):
-        key = ("input", input_key)
-        for st in self.stages:
-            p = self._stage_params(st, params)
-            key = (key, st.id, tuple(sorted(p.items())))
-            yield st, p, key
+    @staticmethod
+    def _key_pair(stage, prev_key, params):
+        """(deps 없는 키, deps 포함 키). 결과가 uses_deps=False라고 밝히면 deps 없는 키로 저장해,
+        그 설정(예: 종이 크기)만 바뀌었을 때 이 단계와 뒤 단계를 다시 계산하지 않음."""
+        own = {spec.key: params[spec.key] for spec in stage.params}
+        base = (prev_key, stage.id, tuple(sorted(own.items())))
+        if not stage.deps:
+            return base, base
+        full = {**own, **{k: params[k] for k in stage.deps}}
+        return base, (prev_key, stage.id, tuple(sorted(full.items())))
+
+    def _hit(self, stage, prev_key, params):
+        """캐시에 맞는 결과가 있으면 (키, 결과), 없으면 (None, None)."""
+        base, full = self._key_pair(stage, prev_key, params)
+        hit = self._cache.get(stage.id)
+        if hit is not None and hit[0] in (base, full):
+            return hit
+        return None, None
 
     def run(self, inputs, input_key, params, is_current=lambda: True):
-        prev, outputs = inputs, {}
-        for st, p, key in self._keys(input_key, params):
-            hit = self._cache.get(st.id)
-            if hit is not None and hit[0] == key:
-                out = hit[1]
+        prev, outputs, key = inputs, {}, ("input", input_key)
+        for st in self.stages:
+            hkey, out = self._hit(st, key, params)
+            if hkey is not None:
+                key = hkey
             else:
                 if not is_current():
                     raise StaleRun()
-                out = st.run(prev, p)
+                out = st.run(prev, self._stage_params(st, params))
                 self.run_counts[st.id] += 1
+                base, full = self._key_pair(st, key, params)
+                key = base if out.get("uses_deps") is False else full
                 self._cache[st.id] = (key, out)
             outputs[st.id] = out
             prev = out
@@ -257,8 +343,9 @@ class Pipeline:
 
     def dirty_from(self, input_key, params):
         """다시 계산해야 하는 첫 단계 id. 전부 캐시에 있으면 None."""
-        for st, _, key in self._keys(input_key, params):
-            hit = self._cache.get(st.id)
-            if hit is None or hit[0] != key:
+        key = ("input", input_key)
+        for st in self.stages:
+            key, _ = self._hit(st, key, params)
+            if key is None:
                 return st.id
         return None

@@ -787,6 +787,8 @@ class SketchSession:
                 "trace": f"획 {len(o['trace']['strokes'])} · 버림 {len(o['trace']['discarded_trace'])}",
                 "dedupe": f"획 {len(o['dedupe']['strokes'])} · 조각 {len(o['dedupe']['discarded_dedupe'])} 제거",
                 "merge": f"획 {len(o['merge']['strokes'])}",
+                "face": (f"얼굴 {o['face']['faces_used']} · 획 {len(o['face']['strokes'])}" if o["face"]["faces_used"]
+                         else ("얼굴 없음" if not r["faces"] else "꺼짐")),
                 "simplify": f"획 {len(o['simplify']['strokes'])} · 점 {pts(o['simplify']['strokes']):,}",
                 "edit": f"획 {n_stroke} · 후보 {n_cand}" + (f" · 제안 {len(self.proposals)}" if self.proposals else ""),
                 "paper": f"{t['total_s'] / 60:.1f}분 · {pl['drawing_width_mm']:.0f}×{pl['drawing_height_mm']:.0f}mm",
