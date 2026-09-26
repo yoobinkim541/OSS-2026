@@ -35,6 +35,17 @@ class RvizLaunchTest(unittest.TestCase):
         self.assertEqual(rl.list_distros(fake_run(None)), ["Ubuntu", "Ubuntu-22.04"])
         self.assertEqual(rl.find_ros_distro(fake_run("Ubuntu-22.04")), "Ubuntu-22.04")
 
+    def test_prefers_setup_helper_distro(self):
+        def run(cmd, **kw):
+            if cmd[:2] == ["wsl.exe", "-l"]:
+                out = "Ubuntu-22.04\r\nMirobotSketch-ROS\r\n".encode("utf-16-le")
+                return subprocess.CompletedProcess(cmd, 0, out, b"")
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")      # 둘 다 ROS 확인 통과
+        with mock.patch.dict(rl.os.environ, {}, clear=False):
+            rl.os.environ.pop("MIROBOT_WSL_DISTRO", None)
+            self.assertEqual(rl.find_ros_distro(run), "MirobotSketch-ROS")
+        self.assertIn("setup-rviz", rl.SETUP_HINT)
+
     def test_no_ros_distro_explains_setup(self):
         popen = mock.Mock()
         with mock.patch.object(rl.sys, "platform", "win32"), mock.patch.object(rl, "_no_window", lambda: 0):

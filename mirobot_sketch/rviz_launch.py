@@ -6,7 +6,7 @@ sim/run_rviz.sh(robot_state_publisher + rviz2 + rviz_playback.py)를 백그라�
 RViz 창은 WSLg로 Windows 바탕화면에 뜹니다. 창을 닫으면 재생도 함께 멈춥니다.
 
 필요: WSL 배포판에 /opt/ros/humble 과 ~/mirobot_ws (wlkata_mirobot_description 빌드).
-배포판을 직접 고르려면 환경 변수 MIROBOT_WSL_DISTRO.
+설치 도우미(rviz_setup)가 만든 MirobotSketch-ROS를 먼저 씁니다. 배포판을 직접 고르려면 환경 변수 MIROBOT_WSL_DISTRO.
 """
 
 import os
@@ -20,7 +20,9 @@ from . import paths
 ROS_CHECK = "test -f /opt/ros/humble/setup.bash && test -f $HOME/mirobot_ws/install/setup.bash"
 SETUP_HINT = ("RViz 3D 보기는 WSL2 Ubuntu 22.04에 ROS 2 Humble과 ~/mirobot_ws"
               "(wlkata_mirobot_description)가 설치된 PC에서만 됩니다.\n"
-              "그 외에는 '로봇 시뮬레이션' 결과(관절 여유)로 확인하세요.")
+              "그 외에는 '로봇 시뮬레이션' 결과(관절 여유)로 확인하세요.\n"
+              "→ 'RViz 3D 환경…' 버튼(또는 mirobot setup-rviz)으로 자동 설치할 수 있습니다.")
+HELPER_DISTRO = "MirobotSketch-ROS"   # rviz_setup이 만드는 전용 배포판
 
 _distro_cache = {}
 
@@ -67,7 +69,9 @@ def find_ros_distro(run=subprocess.run):
     if "name" in _distro_cache:
         return _distro_cache["name"]
     wanted = os.environ.get("MIROBOT_WSL_DISTRO")
-    candidates = [wanted] if wanted else sorted(list_distros(run), key=lambda n: "22.04" not in n)
+    # 우선순위: 지정한 배포판 → 설치 도우미 배포판 → 이름에 22.04 → 나머지
+    candidates = [wanted] if wanted else sorted(list_distros(run),
+                                                key=lambda n: (n != HELPER_DISTRO, "22.04" not in n))
     found = None
     for d in candidates:
         try:
