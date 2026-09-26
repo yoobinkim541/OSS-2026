@@ -493,20 +493,100 @@ def extract_strokes_contour(edges, min_length_px=15):
 # 4. 단순화
 # ---------------------------------------------------------------------------
 
-def simplify_strokes(strokes, epsilon_px=2.0):
-    """approxPolyDP로 각 획의 점을 줄입니다. 원래 선에서 epsilon_px 이상 벗어나지 않음."""
+def smooth_strokes(strokes, sigma_px=2.0):
+    """획을 따라 가우시안으로 매끄럽게 (1px 계단·흔들림 제거). 열린 획은 끝점 고정, 닫힌 획은 고리째.
+    뼈대에서 따라간 촘촘한 획(점 간격 1px)에 씁니다. sigma_px=0이면 그대로."""
+    if sigma_px <= 0:
+        return list(strokes)
     out = []
     for s in strokes:
-        s = np.asarray(s, dtype=np.int32)
-        if len(s) < 3 or epsilon_px <= 0:
+        s = np.asarray(s)
+        closed = is_closed(s)
+        body = s[:-1] if closed else s
+        n = len(body)
+        r = min(int(np.ceil(3 * sigma_px)), n - 1)
+        if n < 3 or r < 1:
             out.append(s)
+            continue
+        k = np.exp(-0.5 * (np.arange(-r, r + 1) / sigma_px) ** 2)
+        k /= k.sum()
+        body = body.astype(np.float64)
+        if closed:
+            pad = np.take(body, np.arange(-r, n + r), axis=0, mode="wrap")
+        else:   # 끝점을 중심으로 뒤집어 덧대면 끝 부분이 안쪽으로 끌려가지 않음
+            pad = np.vstack([2 * body[0] - body[r:0:-1], body, 2 * body[-1] - body[-2:-r - 2:-1]])
+        sm = np.stack([np.convolve(pad[:, i], k, "valid") for i in range(2)], 1)
+        if closed:
+            sm = np.vstack([sm, sm[:1]])
+        else:
+            sm[0], sm[-1] = body[0], body[-1]
+        out.append(sm)
+    return out
+
+
+def simplify_strokes(strokes, epsilon_px=2.0):
+    """approxPolyDP로 각 획의 점을 줄입니다. 원래 선에서 epsilon_px 이상 벗어나지 않음.
+    정수 획은 정수로, 스무딩한 소수 획은 소수로 돌려줍니다."""
+    out = []
+    for s in strokes:
+        s = np.asarray(s)
+        exact = np.issubdtype(s.dtype, np.integer)
+        s = s.astype(np.int32 if exact else np.float32)
+        if len(s) < 3 or epsilon_px <= 0:
+            out.append(s if exact else s.astype(np.float64))
             continue
         if is_closed(s):
             approx = cv2.approxPolyDP(s[:-1].reshape(-1, 1, 2), epsilon_px, closed=True).reshape(-1, 2)
             approx = np.vstack([approx, approx[:1]])
         else:
             approx = cv2.approxPolyDP(s.reshape(-1, 1, 2), epsilon_px, closed=False).reshape(-1, 2)
-        out.append(approx.astype(np.int32))
+        out.append(approx.astype(np.int32 if exact else np.float64))
+    return out
+
+
+def _cut_corners(p, closed, max_dev_px):
+    """꼭짓점마다 양옆으로 c만큼 떨어진 두 점으로 바꿈 (Chaikin처럼 짧은 쪽 선분의 1/4).
+    c는 원래 꼭짓점에서 max_dev_px 이상 벗어나지 않게 줄임: 벗어남 = c·sin(꺾임/2).
+    그래서 완만한 곡선은 둥글어지고, 머리카락 끝처럼 되돌아가는 뾰족한 끝은 거의 그대로 남음."""
+    body = p[:-1] if closed else p
+    n = len(body)
+    idx = range(n) if closed else range(1, n - 1)
+    out = [] if closed else [body[0]]
+    for i in idx:
+        v, a, b = body[i], body[i - 1], body[(i + 1) % n]
+        da, db = a - v, b - v
+        la, lb = np.hypot(*da), np.hypot(*db)
+        if la < 1e-9 or lb < 1e-9:
+            out.append(v)
+            continue
+        cos_in = np.clip(np.dot(da, db) / (la * lb), -1.0, 1.0)   # 안쪽 각의 cos (곧으면 -1)
+        sin_half_turn = np.sqrt((1.0 + cos_in) / 2.0)             # sin(꺾임/2)
+        if sin_half_turn < 1e-3:                                  # 거의 곧음: 점 그대로
+            out.append(v)
+            continue
+        c = min(min(la, lb) / 4.0, max_dev_px / sin_half_turn)
+        out.extend([v + da / la * c, v + db / lb * c])
+    if closed:
+        out.append(out[0])
+    else:
+        out.append(body[-1])
+    return np.array(out)
+
+
+def round_corners(strokes, iterations=1, max_dev_px=1.0):
+    """모서리 둥글리기 (Chaikin 방식, 1회에 점 약 2배). 한 번에 꼭짓점에서 max_dev_px 이상 벗어나지 않음.
+    열린 획은 끝점 고정, 닫힌 획은 고리째. iterations=0이면 그대로."""
+    out = []
+    for s in strokes:
+        s = np.asarray(s)
+        if iterations <= 0 or len(s) < 3:
+            out.append(s)
+            continue
+        closed = is_closed(s)
+        p = s.astype(np.float64)
+        for _ in range(int(iterations)):
+            p = _cut_corners(p, closed, max_dev_px)
+        out.append(p)
     return out
 
 

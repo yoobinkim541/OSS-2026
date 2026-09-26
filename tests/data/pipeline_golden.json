@@ -2,48 +2,48 @@
  "synthetic": {
   "line#0": {
    "count": 8,
-   "total_px": 5674.6,
-   "sha1": "dd054deb74e489459341672140b7316225e97d42"
+   "total_px": 5537.0,
+   "sha1": "bf8221dbd10b4d6fc309f2c8ccc5b9f5a52efa21"
   },
   "line#1": {
    "count": 6,
-   "total_px": 2797.1,
-   "sha1": "c000f7db95c939c819363e51c1695af491979b25"
+   "total_px": 2759.6,
+   "sha1": "0bc47486bd374d6e124e1c178c4b89db6aef7bb4"
   },
   "line#2": {
    "count": 8,
-   "total_px": 5558.1,
-   "sha1": "156a56f4c2e9af7a6eeb004352a2bac8ca6a0715"
+   "total_px": 5521.6,
+   "sha1": "420e0881ace16a606838f3c7463a236e1de8c7f0"
   },
   "line#3": {
    "count": 6,
-   "total_px": 2770.7,
-   "sha1": "da19778822fbe62f79c39a59f31d7123bb79f58f"
+   "total_px": 2753.5,
+   "sha1": "c8ce26e8af82da07c823f0d23d2205f260c74d13"
   },
   "line#4": {
    "count": 8,
-   "total_px": 5568.8,
-   "sha1": "8066a95e227c627970de57c4822b59bd033b9e29"
+   "total_px": 5469.6,
+   "sha1": "2183e9f68d1fce3372a7a0c03ba586746f45fcef"
   },
   "line#5": {
    "count": 6,
-   "total_px": 2743.2,
-   "sha1": "54c6116ebd8ea0864179c5b7f1c47386d427a5d2"
+   "total_px": 2706.3,
+   "sha1": "e6f491284276b8b075d72c7331de18fa03c4b332"
   },
   "line#6": {
    "count": 8,
-   "total_px": 5490.8,
-   "sha1": "fe6d04787142598cbc2dfcaa705918834cf1f802"
+   "total_px": 5451.5,
+   "sha1": "c365788bbf3e2d51a844c9e6c3c65f8be15737cf"
   },
   "line#7": {
    "count": 2,
-   "total_px": 2654.9,
-   "sha1": "178fed5d38e3c185eb3e06945638716364660e9e"
+   "total_px": 2646.0,
+   "sha1": "2ce717d394ec2004e684ed29527736a0c1902fd1"
   },
   "shade#0": {
    "count": 5,
-   "total_px": 3065.7,
-   "sha1": "a01cc23e330596dfc999850e2a84797f6e0b6ef5"
+   "total_px": 2947.6,
+   "sha1": "4ea26a82cf87f3e2727c1178c4b169c7c386f90f"
   },
   "shade#1": {
    "count": 3,
@@ -52,8 +52,8 @@
   },
   "shade#2": {
    "count": 5,
-   "total_px": 2977.4,
-   "sha1": "95712d76efa8f5be1425d1f6f97c2cbcb3adebfd"
+   "total_px": 2936.0,
+   "sha1": "9a56db6f0117bf785eb2aa49a0a9cfc53615023f"
   },
   "shade#3": {
    "count": 3,
@@ -62,85 +62,85 @@
   },
   "shade#4": {
    "count": 4,
-   "total_px": 3006.4,
-   "sha1": "9ef4c95a6e89ab8a7d20fab1e1563729c9ee6c68"
+   "total_px": 2900.8,
+   "sha1": "9de585d1b31331206d8a5a60a4ed7aa23dfe791a"
   },
   "shade#5": {
    "count": 2,
-   "total_px": 364.1,
-   "sha1": "177db73a0ac8c6f4e5d69258aa8176063ab95df7"
+   "total_px": 362.8,
+   "sha1": "fb48f5ad2591d688e35f3aabe9e1526273cc284a"
   },
   "shade#6": {
    "count": 4,
-   "total_px": 2934.5,
-   "sha1": "45aae819621dfbe6e7d9b9fe92a110c38eb84672"
+   "total_px": 2885.5,
+   "sha1": "f355556a4ffa84f4e6d016a141c02b886c6aa402"
   },
   "shade#7": {
    "count": 2,
-   "total_px": 364.1,
-   "sha1": "177db73a0ac8c6f4e5d69258aa8176063ab95df7"
+   "total_px": 362.1,
+   "sha1": "1fde5052d4e59eab3e597e12b792aa1e0bb67e9c"
   }
  },
  "samples": {
   "illust1_color.jpg#0": {
    "count": 296,
-   "total_px": 22263.9,
-   "sha1": "a23c63be3b7a46dcf9dc487564e3f1668b4d4a0b"
+   "total_px": 20705.0,
+   "sha1": "67a1741adacd37f47cb2bfc13f6f3289ca910f1c"
   },
   "illust1_color.jpg#1": {
    "count": 88,
-   "total_px": 9304.6,
-   "sha1": "357e3fb16e1ff7e94f180a3e55ff700f6bc5ca5e"
+   "total_px": 9087.4,
+   "sha1": "6c0ed8e2ee6b67448c3ce2692fc373ec5eec2a7e"
   },
   "illust2_color.jpg#0": {
    "count": 485,
-   "total_px": 20685.4,
-   "sha1": "b39ec5012819215f6e63033e80faf63d67a0d8a6"
+   "total_px": 19025.4,
+   "sha1": "9e6c858da7f65be25bf58e60d523358e7225f9c5"
   },
   "illust2_color.jpg#1": {
    "count": 48,
-   "total_px": 3836.8,
-   "sha1": "a6f1a49c85a9ddf4d1a80a580b0b8e85b54cf748"
+   "total_px": 3709.3,
+   "sha1": "7d1ebb43e75e9eae5357bc0ee1d74d4ffd242414"
   },
   "illust3_manga.jpg#0": {
    "count": 166,
-   "total_px": 21968.7,
-   "sha1": "c48a818043815cd90daaa7f97e629fb5e9889bac"
+   "total_px": 20557.2,
+   "sha1": "851f86af788a860a3afed97834686149074853ef"
   },
   "illust3_manga.jpg#1": {
    "count": 89,
-   "total_px": 10670.9,
-   "sha1": "17b34c7193e67f7e3e3deb0f380c369da8e25cb2"
+   "total_px": 10339.5,
+   "sha1": "1925722b55727d1824a37f039f6a777924676203"
   },
   "photo1_mic.webp#0": {
    "count": 285,
-   "total_px": 9444.8,
-   "sha1": "723fbfc33c26b9000af1a0de79b35dedfa07368c"
+   "total_px": 8520.0,
+   "sha1": "7dc14d4e6b1540ff946df80f52255f9fe7d934c2"
   },
   "photo1_mic.webp#1": {
    "count": 93,
-   "total_px": 8269.1,
-   "sha1": "146d78cbd35326bcac1571f22cf3dc7fa80ef963"
+   "total_px": 8079.4,
+   "sha1": "b4ec9c62cbb52568e892bc57ea8f8855e8b8679c"
   },
   "photo2_stage.jpg#0": {
    "count": 370,
-   "total_px": 13427.8,
-   "sha1": "df9cd815ca86dc7bd54bb8cc46376f56b25631cf"
+   "total_px": 12149.3,
+   "sha1": "f28411c1b9ca3b2822790dd232ebca60562a5376"
   },
   "photo2_stage.jpg#1": {
    "count": 106,
-   "total_px": 9156.6,
-   "sha1": "92fb5247cccb6bdce7c1caab8b61e3fe7710e0b4"
+   "total_px": 8897.8,
+   "sha1": "5ce9c283090964dd5f1cf1103074c0698d99b486"
   },
   "photo3_chair.jpg#0": {
    "count": 304,
-   "total_px": 11816.3,
-   "sha1": "ca89a5a8a2ad14922398e199cc2a1d4905ca87e5"
+   "total_px": 10620.7,
+   "sha1": "4b744c4703277b41972e7b0dd606cffb665bd04b"
   },
   "photo3_chair.jpg#1": {
    "count": 95,
-   "total_px": 9912.4,
-   "sha1": "2b73d5e11063bda8896c6c49a08a9edfbe3b55dc"
+   "total_px": 9667.3,
+   "sha1": "3ab91da58a6d58c52e60b424806c9a747d9d0054"
   }
  }
 }
