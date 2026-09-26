@@ -35,6 +35,12 @@ AUTO_MIN_FACE_MM = 25       # 자동 구도: 전체로 그렸을 때 종이 위 
 FRAME_NAMES = {"full": "전체", "bust": "상반신", "face": "얼굴"}
 
 
+def ellipse_of(face):
+    """얼굴 세밀 처리 영역: 얼굴 상자를 가로 1.3배, 세로 1.4배로 넓힌 타원 ((cx, cy), (반축 x, 반축 y))."""
+    x, y, w, h = face.box
+    return (x + w / 2, y + h / 2), (0.65 * w, 0.7 * h)
+
+
 def frame_box(face, kind, img_w, img_h):
     """얼굴 기준 자르기 틀 (x0, y0, x1, y1). kind: bust(세로 4:5 상반신) | face(얼굴 클로즈업).
     이미지 밖으로 나가면 안쪽으로 밀어 넣고, 이미지보다 크면 이미지 크기로 줄임."""

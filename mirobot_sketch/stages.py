@@ -138,12 +138,15 @@ def _run_simplify(prev, p):
     return {**prev, "strokes": sp.round_corners(st, int(p["round_iters"]))}
 
 
+FRAMES = (("auto", "자동"), ("full", "전체"), ("bust", "상반신"), ("face", "얼굴"))
 EDGE_MODES = (("luma", "밝기"), ("lab", "색 차이"), ("dark", "어두운 선"))
 _hi, _med = presets.DETAIL_PRESETS["high"], presets.IMAGE_TYPES["illustration"]["median"]
 
 STAGES = (
     Stage("source", "원본", (
-        ParamSpec("rembg", "배경 제거 (rembg)", "bool", False, help="첫 실행은 약 1분, 이후 캐시"),),
+        ParamSpec("rembg", "배경 제거 (rembg)", "bool", False, help="첫 실행은 약 1분, 이후 캐시"),
+        ParamSpec("frame", "구도", "choice", "auto", choices=FRAMES,
+                  help="자동=사진 속 얼굴이 종이에서 25mm보다 작으면 상반신으로 자름 (원본 해상도에서 자름)")),
         _run_source, lambda o: o["color"].copy()),
     Stage("prep", "전처리", (
         ParamSpec("median_ksize", "미디언 (px, 망점 제거)", "int", _med, 0, 15,
