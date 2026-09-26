@@ -493,6 +493,45 @@ def extract_strokes_contour(edges, min_length_px=15):
 # 4. 단순화
 # ---------------------------------------------------------------------------
 
+def clip_to_ellipse(strokes, center, axes, inside=True):
+    """타원 안(inside=True) 또는 밖 부분만 남김. 경계를 지나는 획은 경계에서 나눔 (점 사이를 1px 이하로 채워 판정).
+    타원과 전혀 겹치지 않아 통째로 남는 획은 원래 배열을 그대로 돌려줌. 2점 미만 조각은 버림."""
+    (cx, cy), (ax, ay) = center, axes
+    out = []
+    for s in strokes:
+        a = np.asarray(s, dtype=np.float64)
+        if len(a) < 2:
+            continue
+        lo, hi = a.min(0), a.max(0)
+        clear = hi[0] < cx - ax or lo[0] > cx + ax or hi[1] < cy - ay or lo[1] > cy + ay
+        if clear:                          # 타원 상자 밖: 전부 바깥
+            if not inside:
+                out.append(s)
+            continue
+        pts = [a[0]]
+        for p, q in zip(a[:-1], a[1:]):
+            n = max(1, int(np.ceil(np.hypot(*(q - p)))))
+            pts.extend(p + (q - p) * (k / n) for k in range(1, n + 1))
+        pts = np.array(pts)
+        ins = ((pts[:, 0] - cx) / ax) ** 2 + ((pts[:, 1] - cy) / ay) ** 2 <= 1.0
+        want = ins if inside else ~ins
+        if want.all():
+            out.append(s)
+            continue
+        k, n = 0, len(pts)
+        while k < n:
+            if not want[k]:
+                k += 1
+                continue
+            j = k
+            while j < n and want[j]:
+                j += 1
+            if j - k >= 2:
+                out.append(pts[k:j])
+            k = j
+    return out
+
+
 def smooth_strokes(strokes, sigma_px=2.0):
     """획을 따라 가우시안으로 매끄럽게 (1px 계단·흔들림 제거). 열린 획은 끝점 고정, 닫힌 획은 고리째.
     뼈대에서 따라간 촘촘한 획(점 간격 1px)에 씁니다. sigma_px=0이면 그대로."""

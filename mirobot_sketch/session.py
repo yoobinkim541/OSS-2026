@@ -17,8 +17,10 @@ import numpy as np
 from . import draw_executor as de
 from . import edits
 from . import paper_mapping as pm
-from . import paths, presets, stages
+from . import faces, paths, presets, stages
 from . import sketch_pipeline as sp
+
+FACE_CROP_SIDE = 500     # 얼굴 세밀 처리용 조각의 긴 변 (px)
 
 
 class SessionError(Exception):
@@ -62,6 +64,8 @@ class SketchSession:
         self.apply_preset("illustration")
         self.pipeline = stages.Pipeline()
         self._inputs_cache = {}
+        self._faces_cache, self._frame_cache = {}, {}   # 원본 얼굴 검출 / 구도별 입력
+        self._frame_box = None                          # 지금 결과의 자르기 틀 (원본 좌표, None=전체)
         self.result = None
         self.history = []      # 되돌리기용 스냅숏 (번호표, 편집 기록, 다음 번호, 설명)
         self.edit_log = []     # 적용된 편집 설명 (재현·기록용)
@@ -130,7 +134,8 @@ class SketchSession:
 
     # ------------------------------------------------------------ 실패하면 되돌리기
     _STATE = ("result", "table", "next_id", "book", "pending", "proposals", "_groups", "_group_seq", "history",
-              "edit_log", "notice", "_last_simplify", "unapplied", "sim", "_fit_strokes", "proposal_epoch")
+              "edit_log", "notice", "_last_simplify", "unapplied", "sim", "_fit_strokes", "proposal_epoch",
+              "_frame_box")
 
     def _snapshot(self):
         snap = {k: getattr(self, k) for k in self._STATE}
@@ -150,6 +155,8 @@ class SketchSession:
             self.image_path = str(path)
             self.color = color            # 화면·에이전트에 보여 줄 컬러 원본
             self._inputs_cache = {(str(path), False): {"gray": gray, "color": color}}
+            self._faces_cache, self._frame_cache = {}, {}
+            self._frame_box = None
             self.result = self.sim = None
             self.history, self.edit_log = [], []
             self.book = {"removed": [], "added": [], "trash": []}
@@ -158,15 +165,68 @@ class SketchSession:
             self.proposal_epoch += 1
             self.generation += 1
 
-    def _inputs(self, rembg):
+    def _raw(self, path, cache, rembg):
+        """원본 크기 컬러와 긴 변 800px 사본 (배경 제거면 rembg 결과)."""
+        key = (path, bool(rembg))
+        if key not in cache:
+            full = sp.remove_background_bgr(path, max_side=None, cache_dir=paths.cache_dir())
+            color = sp.resize_max_side(full)
+            cache[key] = {"gray": cv2.cvtColor(color, cv2.COLOR_BGR2GRAY), "color": color, "full": full}
+        entry = cache[key]
+        if "full" not in entry:
+            entry["full"] = sp.load_color(path, None)
+        return entry
+
+    def _faces(self, path, full, faces_cache):
+        """원본에서 찾은 얼굴 (이미지마다 한 번, 배경 제거 전 원본 기준)."""
+        if path not in faces_cache:
+            faces_cache[path] = faces.detect_faces(full)
+        return faces_cache[path]
+
+    def _inputs(self, rembg, frame="full", box_mm=100):
+        """파이프라인 입력과 캐시 키 (경로, 배경 제거, 원본 기준 자르기 틀 또는 None).
+        구도는 원본 해상도에서 자른 뒤 긴 변 800px로 맞춤. 얼굴은 작업 이미지 좌표로 옮기고,
+        얼굴 세밀 처리용으로 얼굴 영역을 원본에서 잘라 긴 변 FACE_CROP_SIDE로 맞춘 조각을 같이 넘김."""
         # 배경 제거는 약 1분: 그사이 다른 이미지를 열어도 결과가 새 이미지 캐시에 섞이지 않게 시작 시점의 경로·캐시를 씀
         with self.lock:
             path, cache = self.image_path, self._inputs_cache
-        key = (path, bool(rembg))
-        if key not in cache:
-            color = sp.remove_background_bgr(path, cache_dir=paths.cache_dir())
-            cache[key] = {"gray": cv2.cvtColor(color, cv2.COLOR_BGR2GRAY), "color": color}
-        return cache[key], key
+            faces_cache, frame_cache = self._faces_cache, self._frame_cache
+        plain = self._raw(path, cache, False)
+        found = self._faces(path, plain["full"], faces_cache)
+        entry = self._raw(path, cache, rembg) if rembg else plain
+        full = entry["full"]
+        fh, fw = full.shape[:2]
+        kind, box, note = faces.choose_frame(found, fw, fh, box_mm, frame)
+        key = (path, bool(rembg), box)
+        if (key, kind, note) in frame_cache:
+            return frame_cache[(key, kind, note)], key
+        if box is None:
+            x0 = y0 = 0
+            gray, color = entry["gray"], entry["color"]
+            k = color.shape[0] / fh
+        else:
+            x0, y0, x1, y1 = box
+            color = sp.resize_max_side(full[y0:y1, x0:x1])
+            gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
+            k = color.shape[0] / (y1 - y0)
+        h, w = gray.shape
+        work_faces = [f.scaled(k, -x0 * k, -y0 * k) for f in found]
+        work_faces = [f for f in work_faces
+                      if 0 <= f.box[0] + f.box[2] / 2 < w and 0 <= f.box[1] + f.box[3] / 2 < h]
+        crops = []
+        for f in work_faces:
+            (cx, cy), (ax, ay) = faces.ellipse_of(f)
+            ox0, oy0 = max(0, int((cx - ax) / k + x0)), max(0, int((cy - ay) / k + y0))
+            ox1, oy1 = min(fw, int(np.ceil((cx + ax) / k + x0))), min(fh, int(np.ceil((cy + ay) / k + y0)))
+            piece = full[oy0:oy1, ox0:ox1]
+            sc = FACE_CROP_SIDE / max(piece.shape[:2])
+            img = cv2.resize(piece, (round(piece.shape[1] * sc), round(piece.shape[0] * sc)),
+                             interpolation=cv2.INTER_CUBIC if sc > 1 else cv2.INTER_AREA)
+            crops.append({"img": img, "scale": sc / k, "origin": np.array([(ox0 - x0) * k, (oy0 - y0) * k])})
+        inputs = {"gray": gray, "color": color, "faces": work_faces, "face_crops": crops,
+                  "frame": {"kind": kind, "box_orig": box, "notice": note}}
+        frame_cache[(key, kind, note)] = inputs
+        return inputs, key
 
     def needs_rembg(self):
         """지금 설정으로 계산하면 배경 제거(오래 걸림)를 새로 해야 하는지 (GUI 안내용)."""
@@ -177,7 +237,15 @@ class SketchSession:
         """지금 설정으로 다시 계산될 단계들 (GUI가 흐리게 표시)."""
         with self.lock:
             p = dict(self.params)
-        first = self.pipeline.dirty_from((self.image_path, bool(p["rembg"])), p)
+        with self.lock:
+            entry = self._inputs_cache.get((self.image_path, bool(p["rembg"])), {})
+            found = self._faces_cache.get(self.image_path)
+        if "full" in entry and found is not None:     # 구도 틀은 검출해 둔 얼굴로 바로 계산 (종이 크기로도 바뀜)
+            fh, fw = entry["full"].shape[:2]
+            box = faces.choose_frame(found, fw, fh, p["box_mm"], p["frame"])[1]
+            first = self.pipeline.dirty_from((self.image_path, bool(p["rembg"]), box), p)
+        else:
+            first = "source"
         ids = [s.id for s in stages.ALL_STAGES]
         start = ids.index(first) if first else ids.index("edit")
         return ids[start:]
@@ -189,7 +257,7 @@ class SketchSession:
         with self._run_lock:
             with self.lock:
                 p, gen = dict(self.params), self.generation
-            inputs, ikey = self._inputs(bool(p["rembg"]))
+            inputs, ikey = self._inputs(bool(p["rembg"]), p["frame"], p["box_mm"])
             try:
                 outs = self.pipeline.run(inputs, ikey, p, is_current=lambda: self.generation == gen)
             except stages.StaleRun:
@@ -199,8 +267,17 @@ class SketchSession:
                     return None
                 snap = self._snapshot()
                 try:
+                    reframed = self.result is not None and ikey[2] != self._frame_box
+                    if reframed:     # 좌표계가 바뀜: 이미지를 새로 열 때처럼 편집 기록을 비움
+                        self.history, self.edit_log = [], []
+                        self.book = {"removed": [], "added": [], "trash": []}
+                        self._clear_proposals()
+                    self._frame_box = ikey[2]
                     same = outs["simplify"] is self._last_simplify and self.result is not None
-                    self.result = {"base": inputs["gray"], "color": self.color, "edges": outs["edges"]["edges"],
+                    fr = inputs["frame"]
+                    self.result = {"base": inputs["gray"], "color": inputs["color"], "edges": outs["edges"]["edges"],
+                                   "frame": {"kind": fr["kind"], "notice": fr["notice"]},
+                                   "faces": len(inputs["faces"]),
                                    "stages": outs, "path": self.image_path, "params": p,
                                    "image_type": self.image_type, "detail": self.detail,
                                    "placement": self.result["placement"] if same else None}
@@ -211,6 +288,10 @@ class SketchSession:
                         self.proposal_epoch += 1
                         self.notice = ("설정이 바뀌어 번호를 새로 매겼습니다"
                                        + (f" (제안 {n}건을 취소했습니다)" if n else ""))
+                        if reframed:
+                            self.notice = "구도가 바뀌어 편집 기록을 초기화했습니다"
+                        if fr["notice"]:
+                            self.notice += f" · {fr['notice']}"
                         self._last_simplify = outs["simplify"]
                         self._fit_strokes = [e["poly"] for e in self.table.values() if e["kind"] == "stroke"]
                     self._refresh_drawing(refit=True)
@@ -669,6 +750,7 @@ class SketchSession:
                     "estimated_minutes": round(t["total_s"] / 60, 1),
                     "out_of_executor_limits": self.result["out_of_limits"] > 0,
                     "edits": list(self.edit_log),
+                    "frame": self.result["frame"]["kind"], "faces": self.result["faces"],
                 }
                 s["edit"] = {
                     "proposals": [{"id": v["id"], "change": ("delete" if v["after"] is None else
@@ -698,12 +780,16 @@ class SketchSession:
             n_stroke = sum(1 for e in self.table.values() if e["kind"] == "stroke")
             n_cand = sum(1 for e in self.table.values() if e["kind"] == "candidate")
             return {
-                "source": f"{w}×{h}px" + (" · 배경 제거" if p["rembg"] else ""),
+                "source": f"{w}×{h}px" + (" · 배경 제거" if p["rembg"] else "")
+                          + ("" if r["frame"]["kind"] == "full" else
+                             f" · {faces.FRAME_NAMES[r['frame']['kind']]}" + ("(자동)" if p["frame"] == "auto" else "")),
                 "prep": f"블러 {p['blur_ksize']}px" + (f" · 미디언 {p['median_ksize']}" if p["median_ksize"] > 1 else ""),
                 "edges": f"경계 {int((o['edges']['edges'] > 0).sum()):,}px",
                 "trace": f"획 {len(o['trace']['strokes'])} · 버림 {len(o['trace']['discarded_trace'])}",
                 "dedupe": f"획 {len(o['dedupe']['strokes'])} · 조각 {len(o['dedupe']['discarded_dedupe'])} 제거",
                 "merge": f"획 {len(o['merge']['strokes'])}",
+                "face": (f"얼굴 {o['face']['faces_used']} · 획 {len(o['face']['strokes'])}" if o["face"]["faces_used"]
+                         else ("얼굴 없음" if not r["faces"] else "꺼짐")),
                 "simplify": f"획 {len(o['simplify']['strokes'])} · 점 {pts(o['simplify']['strokes']):,}",
                 "edit": f"획 {n_stroke} · 후보 {n_cand}" + (f" · 제안 {len(self.proposals)}" if self.proposals else ""),
                 "paper": f"{t['total_s'] / 60:.1f}분 · {pl['drawing_width_mm']:.0f}×{pl['drawing_height_mm']:.0f}mm",
@@ -735,7 +821,7 @@ class SketchSession:
                 region_px = self._region_px(region_mm) if region_mm else None
                 views = self.proposal_views() if self.proposals else []
                 return edits.render_edit_view(r["base"].shape, self.table, views, region_px, numbered,
-                                              show_candidates, self.color, float(overlay), max_px)
+                                              show_candidates, r["color"], float(overlay), max_px)
             if kind == "paper":
                 return r["paper"].copy()
             if kind == "strokes":

@@ -37,12 +37,16 @@ SYSTEM_PROMPT = """당신은 사진을 로봇 팔(WLKATA Mirobot)이 펜으로 �
 - 좌표는 종이 중심이 원점인 mm이며 x는 오른쪽, y는 위쪽이 +입니다. ±60mm 밖은 거부됩니다.
 
 처리 단계 (view의 kind로 각 단계 결과를 볼 수 있음)
-- source 원본: rembg(배경 제거)
+- source 원본: rembg(배경 제거), frame(구도: auto 자동 / full 전체 / bust 상반신 / face 얼굴.
+  auto는 사진 속 얼굴이 하나이고 종이에서 25mm보다 작으면 상반신으로 자름. 결과 요약의 frame·faces로 확인)
 - prep 전처리: median_ksize(만화 망점 제거, 11 정도), blur_ksize(가우시안 블러)
 - edges 선 검출: edge_mode = luma(밝기) / lab(색 차이 — 밝기가 비슷한 색 경계도 찾음, 컬러 일러스트·사진에 유리) /
   dark(어두운 선 중심선, 선화), canny_low / canny_high
 - trace 뼈대·획: min_length_px(작은 덩어리 제거), spur_px(잔가지 제거)
-- dedupe 겹침 제거: dedupe_px / merge 이어 붙이기: merge_join_px / simplify 스무딩·단순화: smooth_sigma_px, epsilon_px, round_iters
+- dedupe 겹침 제거: dedupe_px / merge 이어 붙이기: merge_join_px
+- face 얼굴 세밀: face_detail(켬/끔), face_sensitivity(낮을수록 약한 선도), pen_mm(이보다 촘촘한 얼굴 선은 합침).
+  실사 사진에서만 얼굴을 찾음 (애니·만화 그림체는 보통 못 찾음). view(face)의 초록 타원이 처리 영역
+- simplify 스무딩·단순화: smooth_sigma_px, epsilon_px, round_iters
 - paper 종이: box_mm(그림 긴 변 크기. 실행기 허용 범위를 넘으면 실제 드로잉 전 별도 확인 필요)
 - image_type(photo/illustration/manga)과 detail(low/medium/high)은 여러 값을 한꺼번에 채우는 프리셋
 - 선이 빠졌으면 어느 단계에서 빠졌는지 view로 단계를 차례로 보고, 그 단계의 값을 바꾸세요.

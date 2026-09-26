@@ -98,6 +98,26 @@ class GuiSmokeTest(unittest.TestCase):
         finally:
             app._on_close()
 
+    def test_overlay_original_on_auto_cropped_photo(self):
+        # 자동 구도로 자른 사진: "원본 겹치기"는 자른 작업 이미지를 겹쳐야 함 (전체 원본이면 크기가 달라 오류)
+        import test_face_session as tfs
+        from mirobot_sketch import session as session_mod
+        root, app = make_app()
+        try:
+            with tempfile.TemporaryDirectory() as d, \
+                    mock.patch.object(session_mod.faces, "detect_faces", lambda img, **kw: [tfs.SMALL]):
+                p = Path(d) / "photo.png"
+                tfs.photo(p)
+                app.load_image(p)
+                self.assertTrue(pump(root, app, lambda: app.result is not None and app._workers == 0))
+                self.assertEqual(app.result["frame"]["kind"], "bust")
+                app.view.alpha.set(0.5)
+                for sid in ("edges", "face", "simplify", "edit"):
+                    app.select_stage(sid)
+                    root.update()
+        finally:
+            app._on_close()
+
     def test_edit_stage_shows_proposals_and_applies(self):
         root, app = make_app()
         try:

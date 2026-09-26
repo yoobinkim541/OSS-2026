@@ -56,4 +56,4 @@ packages = ["mirobot_sketch", "mirobot_sketch.agent"]
 version = { attr = "mirobot_sketch.__version__" }
 
 [tool.setuptools.package-data]
-mirobot_sketch = ["data/*.json", "data/*.png", "data/*.ico"]
+mirobot_sketch = ["data/*.json", "data/*.png", "data/*.ico", "data/*.onnx"]
