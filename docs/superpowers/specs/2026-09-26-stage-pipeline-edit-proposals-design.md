@@ -164,7 +164,7 @@
 |---|---|
 | `delete` | `ids` |
 | `restore` | `ids` (후보 번호) |
-| `delete_region` | `region_mm`, `mode`(inside/crossing), `min_fraction` |
+| `delete_region` | `region_mm`, `mode`(inside / crossing / outside), `min_fraction` |
 | `move_point` | `id`, `index`, `to_mm` |
 | `delete_points` | `id`, `indices` |
 | `insert_point` | `id`, `after_index`, `at_mm` |

@@ -68,13 +68,14 @@ class SketchSession:
         self.sim = None
         self.table = {}        # 번호 -> {"kind": stroke|candidate|gone, "poly": px 배열, "reason": 이유}
         self.next_id = 1
-        self.book = {"removed": [], "added": []}   # 모양 기반 편집 기록 (다시 계산해도 유지)
+        self.book = {"removed": [], "added": [], "trash": []}   # 모양 기반 편집 기록 (다시 계산해도 유지)
         self.pending = None    # 제안이 반영된 번호표 사본 (제안이 없으면 None)
         self.proposals = {}    # 번호 -> {"id", "group"}
         self._groups, self._group_seq = {}, 0
         self.unapplied = 0
         self.notice = ""
         self._last_simplify = None
+        self.proposal_epoch = 0  # 번호를 새로 매길 때마다 +1 (다른 번호 체계의 제안 표시를 섞지 않게)
         self._fit_strokes = []   # 종이 배치(배율·중심)를 정하는 획: 파이프라인 결과 기준으로 고정 (편집해도 mm 좌표가 안 움직이게)
 
     # ------------------------------------------------------------ 설정
@@ -127,12 +128,13 @@ class SketchSession:
         return applied
 
     # ------------------------------------------------------------ 실패하면 되돌리기
-    _STATE = ("result", "table", "next_id", "book", "pending", "proposals", "_groups", "history", "edit_log",
-              "notice", "_last_simplify", "unapplied", "sim", "_fit_strokes")
+    _STATE = ("result", "table", "next_id", "book", "pending", "proposals", "_groups", "_group_seq", "history",
+              "edit_log", "notice", "_last_simplify", "unapplied", "sim", "_fit_strokes", "proposal_epoch")
 
     def _snapshot(self):
         snap = {k: getattr(self, k) for k in self._STATE}
         snap["history"], snap["edit_log"] = list(self.history), list(self.edit_log)
+        snap["proposals"], snap["_groups"] = dict(self.proposals), dict(self._groups)   # _add_group이 제자리에서 바꿈
         return snap
 
     def _restore(self, snap):
@@ -149,9 +151,10 @@ class SketchSession:
             self._inputs_cache = {(str(path), False): {"gray": gray, "color": color}}
             self.result = self.sim = None
             self.history, self.edit_log = [], []
-            self.book = {"removed": [], "added": []}
+            self.book = {"removed": [], "added": [], "trash": []}
             self._clear_proposals()
             self._last_simplify = None
+            self.proposal_epoch += 1
             self.generation += 1
 
     def _inputs(self, rembg):
@@ -204,7 +207,7 @@ class SketchSession:
                         n = len(self.proposals)
                         self._build_table(outs, inputs["gray"].shape)
                         self._clear_proposals()
-                        self.history = []
+                        self.proposal_epoch += 1
                         self.notice = ("설정이 바뀌어 번호를 새로 매겼습니다"
                                        + (f" (제안 {n}건을 취소했습니다)" if n else ""))
                         self._last_simplify = outs["simplify"]
@@ -257,11 +260,17 @@ class SketchSession:
             put("stroke", np.asarray(base[i], np.float64), "")
         for a in self.book["added"]:
             put("stroke", a, "added")
-        for poly, reason in stages.candidates_of(outs):
-            put("candidate", np.asarray(sp.simplify_strokes([poly], 1.0)[0], np.float64), reason)
+        cands = [(np.asarray(sp.simplify_strokes([poly], 1.0)[0], np.float64), reason)
+                 for poly, reason in stages.candidates_of(outs)]
+        # 되살려 획이 된(추가한) 모양과 같은 후보는 다시 후보로 보이지 않게
+        keep_c, _ = edits.remove_matching([c for c, _ in cands], self.book["added"], shape)
+        for k in keep_c:
+            put("candidate", *cands[k])
         for r, h in zip(self.book["removed"], hit):
             if h and r["reason"] == "deleted":
                 put("candidate", r["poly"], "deleted")
+        for t in self.book["trash"]:
+            put("candidate", t, "deleted")
         self.table, self.next_id = table, nid
         self.unapplied = hit.count(False)
 
@@ -317,8 +326,8 @@ class SketchSession:
             i = _as_int(i)
             e = table.get(i)
             if e is None or e["kind"] != kind:
-                what = "획" if kind == "stroke" else "후보"
-                raise SessionError(f"{i}번은 {what}가 아닙니다")
+                what = "획이" if kind == "stroke" else "후보가"
+                raise SessionError(f"{i}번은 {what} 아닙니다")
             return i, e
 
         if name in ("delete", "delete_region"):
@@ -376,8 +385,8 @@ class SketchSession:
                            "insert_point, smooth, split, join, add_stroke)")
 
     def _ids_in_region(self, table, region_mm, mode, min_fraction):
-        if mode not in ("inside", "outside"):
-            raise SessionError("mode는 inside 또는 outside")
+        if mode not in ("inside", "outside", "crossing"):
+            raise SessionError("mode는 inside(대부분 안) / crossing(조금이라도 걸침) / outside(대부분 밖)")
         x0, y0, x1, y1 = self._region_px(region_mm)
         ids = []
         for i, e in table.items():
@@ -385,13 +394,15 @@ class SketchSession:
                 continue
             d = edits.densify(e["poly"])
             inside = ((d[:, 0] >= x0) & (d[:, 0] <= x1) & (d[:, 1] >= y0) & (d[:, 1] <= y1)).mean()
-            if (inside if mode == "inside" else 1 - inside) >= min_fraction:
+            hit = (inside > 0 if mode == "crossing"
+                   else (inside if mode == "inside" else 1 - inside) >= min_fraction)
+            if hit:
                 ids.append(i)
         return ids
 
     # ------------------------------------------------------------ 제안
     def _clear_proposals(self):
-        self.pending, self.proposals, self._groups = None, {}, {}
+        self.proposals, self._groups, self.pending = {}, {}, None   # 제안 목록을 먼저 비움 (pending만 None인 순간 없게)
 
     def _add_group(self, ids):
         merged = set(ids)
@@ -429,16 +440,25 @@ class SketchSession:
             if apply_now and touched & set(self.proposals):
                 raise SessionError(f"{sorted(touched & set(self.proposals))}번에 확인 전 제안이 있어 바로 적용할 수 "
                                    "없습니다. 먼저 그 제안을 적용하거나 취소하세요.")
+            snap = self._snapshot()
             self.pending, self.next_id = table, counter[0]
             for g in groups:
                 self._add_group(g)
             created = sorted({i for g in groups for i in g})
             if apply_now:
-                return self.apply_proposals(only=created)
+                try:
+                    return self.apply_proposals(only=created)
+                except SessionError as e:
+                    self._restore(snap)
+                    raise SessionError(f"{e} (바로 적용이 거부되어 제안도 추가하지 않았습니다)") from None
             return {"proposed": created, "total": len(self.proposals)}
 
     def proposal_views(self):
-        """제안마다 사라질 모양(before, 빨강)과 생길 모양(after, 초록)."""
+        """제안마다 사라질 모양(before, 빨강)과 생길 모양(after, 초록). 다른 스레드가 바꾸는 중이면 기다림."""
+        with self.lock:
+            return self._proposal_views()
+
+    def _proposal_views(self):
         out = []
         for i in sorted(self.proposals):
             old, new = self.table.get(i), self.pending[i]
@@ -450,11 +470,12 @@ class SketchSession:
         return out
 
     def proposal_region_mm(self, ids=None, margin_mm=5.0):
-        polys = [p for v in self.proposal_views() if ids is None or v["id"] in ids
-                 for p in (v["before"], v["after"]) if p is not None]
-        if not polys:
-            return None
-        mm = self.px_to_mm(np.vstack(polys))
+        with self.lock:
+            polys = [p for v in self._proposal_views() if ids is None or v["id"] in ids
+                     for p in (v["before"], v["after"]) if p is not None]
+            if not polys:
+                return None
+            mm = self.px_to_mm(np.vstack(polys))
         (x0, y0), (x1, y1) = mm.min(axis=0) - margin_mm, mm.max(axis=0) + margin_mm
         return [float(x0), float(y0), float(x1), float(y1)]
 
@@ -474,10 +495,17 @@ class SketchSession:
             if k is not None:
                 book["removed"].pop(k)      # 지웠던 파이프라인 획을 되살림
                 return
+            k = self._find(book["trash"], old["poly"])
+            if k is not None:
+                book["trash"].pop(k)        # 지웠던 추가 획(점 편집 결과 등)을 되살림
+                book["added"].append(new["poly"])
+                return
         if was:
             k = self._find(book["added"], old["poly"])
             if k is not None:
                 book["added"].pop(k)
+                if new["kind"] == "candidate":
+                    book["trash"].append(old["poly"])   # 다시 계산해도 후보로 남아 되살릴 수 있게
             else:
                 reason = "deleted" if new["kind"] == "candidate" else "replaced"
                 book["removed"].append({"poly": old["poly"], "reason": reason})
@@ -500,7 +528,7 @@ class SketchSession:
                 raise SessionError("적용할 제안이 선택되지 않았습니다" + (
                     f" ({partial}번은 다른 번호와 묶인 편집(잇기·자르기)이라 함께 골라야 합니다)" if partial else ""))
             table = dict(self.table)
-            book = {"removed": list(self.book["removed"]), "added": list(self.book["added"])}
+            book = {k: list(v) for k, v in self.book.items()}
             for i in sorted(apply_ids):
                 self._record(book, self.table.get(i), self.pending[i])
                 table[i] = self.pending[i]
@@ -509,7 +537,7 @@ class SketchSession:
             desc = f"편집 {len(apply_ids)}건 적용: {sorted(apply_ids)[:20]}"
             snap = self._snapshot()
             try:
-                self.history.append((self.table, self.book, self.next_id, desc))
+                self.history.append((self.table, self.book, self.next_id, desc, self._last_simplify))
                 rest = ids - apply_ids           # 고르지 않은 제안은 남김 (새 번호표 위의 제안으로)
                 pending = dict(table)
                 for i in rest:
@@ -551,10 +579,17 @@ class SketchSession:
             if not self.history:
                 return None
             snap = self._snapshot()
-            self.table, self.book, self.next_id, desc = self.history.pop()
+            table, book, next_id, desc, simplify = self.history.pop()
             self._clear_proposals()
             try:
                 self.result = dict(self.result)
+                if simplify is self._last_simplify:      # 같은 번호 체계: 번호표를 그대로 되돌림
+                    self.table, self.book, self.next_id = table, book, next_id
+                else:                                    # 그 뒤 다시 계산됨: 모양 기록으로 번호표를 다시 만듦
+                    self.book = book
+                    self._build_table(self.result["stages"], self.result["base"].shape)
+                    self.proposal_epoch += 1
+                    self.notice = "되돌리면서 번호를 새로 매겼습니다"
                 self._refresh_drawing()
             except Exception:
                 self._restore(snap)

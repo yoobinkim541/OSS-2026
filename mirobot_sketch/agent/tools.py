@@ -134,7 +134,7 @@ TOOLS = [
             "편집을 제안합니다(바로 적용되지 않음). 화면에 빨강(사라짐)·초록(생김)과 번호로 표시되고, "
             "바뀌는 부위를 확대한 그림을 돌려줍니다. 하나라도 틀리면 아무것도 바뀌지 않습니다. 최대 200개.\n"
             "ops 항목: {op:'delete', ids:[...]} | {op:'restore', ids:[후보 번호]} | "
-            "{op:'delete_region', region_mm:[x0,y0,x1,y1], mode:'inside'|'outside'} | "
+            "{op:'delete_region', region_mm:[x0,y0,x1,y1], mode:'inside'|'crossing'|'outside'} | "
             "{op:'move_point', id, index, to_mm:[x,y]} | {op:'delete_points', id, indices:[...]} | "
             "{op:'insert_point', id, after_index, at_mm:[x,y]} | {op:'smooth', id, strength:1~5} | "
             "{op:'split', id, index} | {op:'join', a, b} | {op:'add_stroke', points_mm:[[x,y],...]}\n"
@@ -224,10 +224,12 @@ class AgentToolbox:
         if image_type or detail:
             s.apply_preset(image_type, detail)
         applied = s.update_params(changes) if changes else {}
+        recomputed = s.dirty_stages()
         s.run_current()
         self.on_change("result")
         st = s.state()
-        return [text_part({"applied": applied, "image_type": st["image_type"], "detail": st["detail"],
+        return [text_part({"applied": applied, "recomputed": recomputed,
+                           "image_type": st["image_type"], "detail": st["detail"],
                            "result": st.get("result"), "edit": st.get("edit")})]
 
     def _list_strokes(self, region_mm=None, include_candidates=False):

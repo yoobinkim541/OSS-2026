@@ -347,6 +347,128 @@ class ReviewFixesTest(SessionTestBase):
         self.assertIn(a, s.proposals)                                     # 기존 제안은 남음
 
 
+class MinorFixesTest(SessionTestBase):
+    """최종 리뷰 Minor 항목 재현."""
+
+    def strokes(self, s):
+        return sorted(i for i, e in s.table.items() if e["kind"] == "stroke")
+
+    def bump(self, s):
+        s.update_params({"canny_low": s.params["canny_low"] + 3})
+        s.run_current()
+
+    def test_proposal_views_wait_for_the_lock(self):
+        s = self.new_session()
+        s.propose_edits([{"op": "delete", "ids": [self.strokes(s)[0]]}])
+        done = threading.Event()
+        with s.lock:                       # 다른 스레드가 제안을 바꾸는 중인 상황
+            t = threading.Thread(target=lambda: (s.proposal_views(), done.set()))
+            t.start()
+            self.assertFalse(done.wait(0.3))   # 잠금이 풀릴 때까지 기다려야 함
+        t.join(5)
+        self.assertTrue(done.is_set())
+
+    def test_proposal_epoch_changes_only_on_renumber(self):
+        s = self.new_session()
+        e0 = s.proposal_epoch
+        a, b = self.strokes(s)[:2]
+        s.propose_edits([{"op": "delete", "ids": [a, b]}])
+        s.apply_proposals(exclude=[b])
+        self.assertEqual(s.proposal_epoch, e0)          # 적용 뒤 남은 제안은 같은 번호 체계
+        self.bump(s)
+        self.assertNotEqual(s.proposal_epoch, e0)       # 번호를 새로 매기면 바뀜
+
+    def test_undo_after_recompute_restores_the_edit_record(self):
+        s = self.new_session()
+        n = len(self.strokes(s))
+        s.propose_edits([{"op": "delete", "ids": [self.strokes(s)[0]]}], apply_now=True)
+        self.bump(s)
+        self.assertEqual(len(self.strokes(s)), n - 1)
+        self.assertIsNotNone(s.undo())                   # 다시 계산한 뒤에도 되돌릴 수 있음
+        self.assertEqual(len(self.strokes(s)), n)
+
+    def test_deleted_edited_stroke_can_be_restored_after_recompute(self):
+        s = self.new_session()
+        sid = self.strokes(s)[0]
+        s.propose_edits([{"op": "smooth", "id": sid, "strength": 3}], apply_now=True)
+        edited = s.table[sid]["poly"]
+        s.propose_edits([{"op": "delete", "ids": [sid]}], apply_now=True)
+        self.bump(s)
+        cand = [i for i, e in s.table.items() if e["kind"] == "candidate" and e["poly"] is edited]
+        self.assertEqual(len(cand), 1)
+        s.propose_edits([{"op": "restore", "ids": cand}], apply_now=True)
+        self.bump(s)
+        self.assertTrue(any(e["kind"] == "stroke" and e["poly"] is edited for e in s.table.values()))
+
+    def test_restored_candidate_is_not_listed_twice_after_recompute(self):
+        s = self.new_session()
+        cid = min(i for i, e in s.table.items() if e["kind"] == "candidate")
+        poly = s.table[cid]["poly"]
+        s.propose_edits([{"op": "restore", "ids": [cid]}], apply_now=True)
+        self.bump(s)
+        close = [e["kind"] for e in s.table.values()
+                 if e["poly"].shape == poly.shape and np.allclose(e["poly"], poly)]
+        self.assertEqual(close, ["stroke"])
+
+    def test_refused_apply_now_adds_no_proposals(self):
+        s = self.new_session()
+        with self.assertRaises(SessionError) as cm:
+            s.propose_edits([{"op": "delete", "ids": self.strokes(s)}], apply_now=True)
+        self.assertIn("추가하지 않았습니다", str(cm.exception))
+        self.assertEqual(s.proposals, {})
+
+    def test_delete_region_crossing_mode(self):
+        s = self.new_session()
+        region = [-5, -5, 5, 5]
+        s.propose_edits([{"op": "delete_region", "region_mm": region, "mode": "crossing"}])
+        crossing = set(s.proposals)
+        s.discard_proposals()
+        s.propose_edits([{"op": "delete_region", "region_mm": region, "mode": "inside"}])
+        self.assertTrue(set(s.proposals) <= crossing)
+        self.assertTrue(crossing)
+
+    def test_error_wording(self):
+        s = self.new_session()
+        cand = next(i for i, e in s.table.items() if e["kind"] == "candidate")
+        with self.assertRaises(SessionError) as cm:
+            s.propose_edits([{"op": "delete", "ids": [cand]}])
+        self.assertIn("획이 아닙니다", str(cm.exception))
+
+    def test_concurrent_recompute_and_edits_stay_consistent(self):
+        s = self.new_session()
+        errors = []
+
+        def recompute():
+            for k in range(6):
+                try:
+                    s.update_params({"epsilon_px": 1.0 + 0.2 * k})
+                    s.run()
+                except Exception as e:   # 계산 스레드에서 난 예외는 모두 실패
+                    errors.append(e)
+
+        def edit():
+            for _ in range(30):
+                try:
+                    ids = [i for i, e in s.table.items() if e["kind"] == "stroke"][:1]
+                    s.propose_edits([{"op": "smooth", "id": ids[0]}])
+                    s.proposal_views()
+                    s.apply_proposals()
+                except SessionError:
+                    pass                 # 번호가 바뀌는 등 정상적인 거부
+                except Exception as e:
+                    errors.append(e)
+
+        ts = [threading.Thread(target=recompute), threading.Thread(target=edit)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(120)
+        self.assertEqual(errors, [])
+        s.run_current()
+        self.assertIn("timing", s.result)
+        s.render("edit")
+
+
 class ToolboxTest(SessionTestBase):
     def test_tools_do_not_include_robot_execution(self):
         names = {t["name"] for t in TOOLS}
@@ -408,6 +530,11 @@ class ToolboxTest(SessionTestBase):
         self.assertFalse(names & {"delete_strokes", "delete_region"})
         self.assertTrue({"list_strokes", "get_stroke", "propose_edits", "apply_proposals",
                          "discard_proposals"} <= names)
+
+    def test_set_params_reports_recomputed_stages(self):
+        tb = AgentToolbox(self.new_session())
+        out = json.loads(tb.call("set_params", {"epsilon_px": 2.2})[0][0]["text"])
+        self.assertEqual(out["recomputed"], ["simplify", "edit", "paper"])
 
     def test_set_params_notifies_screen(self):
         changes = []

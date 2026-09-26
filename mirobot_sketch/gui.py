@@ -112,6 +112,7 @@ class SketchApp:
         self.stage_id = "source"
         self._workers = 0              # 돌고 있는 재계산 스레드 수
         self._recompute_after = None   # 예약된 재계산 (after id)
+        self._recompute_pending = False  # 에이전트 작업 중 들어온 재계산 요청 (끝나면 실행)
         # 작업 스레드 -> 화면: Tkinter는 스레드에 안전하지 않으므로 작업 스레드는 큐에
         # 할 일만 넣고, 메인 스레드가 주기적으로 꺼내 실행한다.
         self._ui_queue = queue.Queue()
@@ -432,7 +433,7 @@ class SketchApp:
     def refresh_proposals(self):
         views = self.session.proposal_views() if self.session.proposals else []
         if views:
-            self.proposal_bar.set_views(views)
+            self.proposal_bar.set_views(views, self.session.proposal_epoch)
             self.proposal_bar.pack(fill="x", padx=8, pady=(0, 8))
         else:
             self.proposal_bar.pack_forget()
@@ -440,12 +441,25 @@ class SketchApp:
             self.view.redraw()
 
     def _apply_proposals(self, exclude):
-        try:
-            out = self.session.apply_proposals(exclude=exclude)
-        except Exception as e:  # SessionError 포함 (예: 모든 획 삭제)
-            messagebox.showerror("적용 실패", str(e))
-            return
-        self._show_result(self.session.result, status=f"편집 {len(out['applied'])}건 적용. {out['note']}".strip())
+        """적용(순서 정하기·미리보기 다시 그리기)은 획이 많으면 오래 걸려 작업 스레드에서."""
+        if self._workers == 0:
+            self.progress.configure(mode="indeterminate")
+            self.progress.start()
+        self._workers += 1
+        self._set_status("편집 적용 중...")
+
+        def work():
+            try:
+                out = self.session.apply_proposals(exclude=exclude)
+                msg = f"편집 {len(out['applied'])}건 적용. {out['note']}".strip()
+                self._ui(self._show_result, self.session.result, msg)
+            except Exception as e:  # SessionError 포함 (예: 모든 획 삭제)
+                self._ui(messagebox.showerror, "적용 실패", str(e))
+                self._set_status("적용하지 못했습니다.")
+            finally:
+                self._ui(self._worker_done)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _discard_proposals(self):
         self.session.discard_proposals()
@@ -478,6 +492,11 @@ class SketchApp:
         self.sim_btn.configure(state=state)
         if self.controls is not None:
             self.controls.set_enabled(not busy)
+        for seg in (self.type_seg, self.detail_seg):
+            seg.configure(state="disabled" if busy else "normal")
+        if not busy and self._recompute_pending:
+            self._recompute_pending = False
+            self._schedule_recompute(0)
 
     def _start_busy(self, text):
         self.busy = True
@@ -507,7 +526,10 @@ class SketchApp:
 
     def _start_recompute(self):
         self._recompute_after = None
-        if self._agent_busy or self.img_path is None:
+        if self.img_path is None:
+            return
+        if self._agent_busy:
+            self._recompute_pending = True   # 에이전트가 끝나면 다시 계산
             return
         self.strip.set_stale(self.session.dirty_stages())
         if self._workers == 0:

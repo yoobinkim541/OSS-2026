@@ -70,9 +70,8 @@ class GuiSmokeTest(unittest.TestCase):
                 root.update()
                 self.assertTrue(app.proposal_bar.winfo_manager())          # 제안이 있으면 바가 배치됨
                 self.assertIn(sid, app.proposal_bar.chips)
-                app.proposal_bar.apply_btn.invoke()
-                root.update()
-                self.assertEqual(s.table[sid]["kind"], "candidate")
+                app.proposal_bar.apply_btn.invoke()                        # 적용은 작업 스레드에서
+                self.assertTrue(pump(root, app, lambda: app._workers == 0 and s.table[sid]["kind"] == "candidate"))
                 self.assertFalse(app.proposal_bar.winfo_manager())         # 적용하면 사라짐
         finally:
             app._on_close()
@@ -101,6 +100,40 @@ class GuiSmokeTest(unittest.TestCase):
                 self.assertLess(time.time() - t0, 5.0)
                 self.assertLessEqual(len(app.view.ax.texts), 450)
                 self.assertLessEqual(len(app.view.ax.lines), 4)       # 제안마다 plot 하지 않음
+        finally:
+            app._on_close()
+
+
+    def test_gui_minor_behaviours(self):
+        root, app = make_app()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "line.png"
+                cv2.imwrite(str(p), golden.synthetic_images()["line"])
+                app.load_image(p)
+                self.assertTrue(pump(root, app, lambda: app.result is not None and app._workers == 0))
+                s = app.session
+                # 1) 뺀 표시는 번호를 새로 매기면 풀림
+                sid = next(i for i, e in s.table.items() if e["kind"] == "stroke")
+                s.propose_edits([{"op": "delete", "ids": [sid]}])
+                app.refresh_proposals()
+                app.proposal_bar._toggle(sid)
+                app._on_param("canny_low", s.params["canny_low"] + 4)
+                self.assertTrue(pump(root, app, lambda: app._workers == 0 and s.proposals == {}))
+                sid = next(i for i, e in s.table.items() if e["kind"] == "stroke")
+                s.propose_edits([{"op": "delete", "ids": [sid]}])
+                app.refresh_proposals()
+                self.assertEqual(app.proposal_bar.excluded, set())
+                # 2) 적용은 작업 스레드에서 (화면이 멈추지 않게) 끝나면 반영
+                app.proposal_bar.apply_btn.invoke()
+                self.assertTrue(pump(root, app, lambda: s.table[sid]["kind"] == "candidate" and app._workers == 0))
+                # 3) 에이전트 작업 중 프리셋을 바꾸면, 끝난 뒤 다시 계산
+                app.agent_busy(True)
+                app.detail_seg.set("낮음")
+                app.apply_detail_preset()
+                root.update()
+                app.agent_busy(False)
+                self.assertTrue(pump(root, app, lambda: app._workers == 0 and app.result["detail"] == "low"))
         finally:
             app._on_close()
 

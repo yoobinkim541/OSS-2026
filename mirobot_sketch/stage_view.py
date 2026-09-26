@@ -265,7 +265,7 @@ class ProposalBar(ctk.CTkFrame):
 
     def __init__(self, master, font, on_apply, on_discard):
         super().__init__(master, fg_color=("#f3f6fb", "#1b2029"), corner_radius=12)
-        self.font, self.excluded, self.chips = font, set(), {}
+        self.font, self.excluded, self.chips, self.epoch = font, set(), {}, None
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.pack(fill="x", padx=10, pady=(8, 2))
         self.summary = ctk.CTkLabel(top, text="", font=font(13, "bold"))
@@ -280,7 +280,9 @@ class ProposalBar(ctk.CTkFrame):
         self.chip_row = ctk.CTkScrollableFrame(self, orientation="horizontal", height=34, fg_color="transparent")
         self.chip_row.pack(fill="x", padx=6, pady=(0, 6))
 
-    def set_views(self, views):
+    def set_views(self, views, epoch=None):
+        if epoch != self.epoch:            # 번호를 새로 매겼으면 예전 '뺌' 표시는 다른 획의 것
+            self.excluded, self.epoch = set(), epoch
         for w in self.chip_row.winfo_children():
             w.destroy()
         self.chips = {}
