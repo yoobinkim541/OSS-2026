@@ -169,11 +169,17 @@ class DrawJob:
         return path
 
     def _open_rviz(self, traj):
+        """RViz 따라가기를 백그라운드로 엶. WSL이 깨어나는 데 10초 넘게 걸릴 수 있어 드로잉은 기다리지 않음
+        (RViz는 진행 파일로 현재 위치를 따라잡음)."""
         launch = self.launch_rviz
         if launch is None:
             from .rviz_launch import launch
-        try:
-            launch(traj, follow=self.progress_path)
-            self.events("rviz", ok=True, message="RViz 따라가기를 열었습니다")
-        except Exception as e:  # RvizUnavailable 포함: 드로잉은 계속
-            self.events("rviz", ok=False, message=str(e))
+
+        def work():
+            try:
+                launch(traj, follow=self.progress_path)
+                self.events("rviz", ok=True, message="RViz 따라가기를 열었습니다")
+            except Exception as e:  # RvizUnavailable 포함: 드로잉은 계속
+                self.events("rviz", ok=False, message=str(e))
+
+        threading.Thread(target=work, daemon=True).start()

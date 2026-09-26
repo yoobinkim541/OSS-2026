@@ -126,6 +126,27 @@ class DrawJobTest(unittest.TestCase):
             pre = [st for i, st in rec.steps() if i == "preflight"]
             self.assertEqual(pre[-1], "failed" if expect == "failed" else "done", pending)
 
+    def test_slow_rviz_launch_does_not_delay_drawing(self):
+        import time
+        rec = Recorder()
+        job = self.job(rec, launch_rviz=lambda *a, **k: time.sleep(3))   # WSL이 깨어나는 데 오래 걸리는 경우
+        job.start(virtual=True, virtual_speed=500)
+        self.assertTrue(rec.ready.wait(10))
+        t0 = time.monotonic()
+        job.confirm(checked=True)
+        first = threading.Event()
+        orig = job.events
+
+        def watch(kind, **d):
+            if kind == "progress":
+                first.set()
+            orig(kind, **d)
+
+        job.events = watch
+        self.assertTrue(first.wait(5))
+        self.assertLess(time.monotonic() - t0, 1.0)       # RViz를 기다리지 않고 바로 첫 명령
+        self.assertTrue(rec.done.wait(60))
+
     def test_rviz_unavailable_does_not_block_drawing(self):
         rec = Recorder()
 
