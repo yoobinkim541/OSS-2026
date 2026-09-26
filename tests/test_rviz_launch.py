@@ -63,12 +63,13 @@ class RvizLaunchTest(unittest.TestCase):
     def test_trajectory_doc_matches_playback_format(self):
         cfg = {"pen": {"pen_tip_offset_mm": [100, 0, 0]}}
         with mock.patch.object(ms, "pen_tip_offset", lambda c: __import__("numpy").array([100.0, 0, 0])):
-            doc = ms.trajectory_doc({"samples": [([0.0] * 6, __import__("numpy").array([200.0, 0, 230]), "G01", 1)]},
-                                    cfg, "x.png")
+            doc = ms.trajectory_doc({"samples": [([0.0] * 6, __import__("numpy").array([200.0, 0, 230]), "G01", 1, 0)],
+                                     "cmd_feed": [1000.0]}, cfg, "x.png")
         p = doc["points"][0]
         self.assertEqual(p["pen_tip_mm"], [300.0, 0.0, 230.0])
         self.assertTrue(p["pen_down"])
         self.assertEqual(len(doc["joint_names"]), 6)
+        self.assertEqual((p["cmd"], doc["command_count"]), (0, 1))
 
 
 class SourceCompilesTest(unittest.TestCase):

@@ -53,5 +53,21 @@ class PathTest(unittest.TestCase):
         self.assertFalse(ms.verdict(result).startswith("FAIL"))
 
 
+class TrajectoryCmdTest(unittest.TestCase):
+    def test_points_carry_command_index(self):
+        de = ms.de
+        strokes = [[(-10.0, -10.0), (10.0, -10.0), (10.0, 10.0)]]
+        res = ms.simulate(ms.plan_targets(strokes, CFG))
+        doc = ms.trajectory_doc(res, CFG, "t")
+        cmds = [p["cmd"] for p in doc["points"]]
+        n = len(de.Planner(CFG).plan(strokes))
+        self.assertEqual(cmds[0], -1)
+        self.assertEqual(sorted(set(cmds)), list(range(-1, n)))        # 명령마다 점이 1개 이상
+        self.assertEqual(cmds, sorted(cmds))                           # 순서대로 늘어남
+        self.assertEqual(doc["command_count"], n)
+        self.assertEqual(len(doc["cmd_feed_mm_min"]), n)
+        self.assertEqual(doc["cmd_feed_mm_min"][0], CFG["feeds_mm_per_min"]["approach"])
+
+
 if __name__ == "__main__":
     unittest.main()
