@@ -138,5 +138,30 @@ class GuiSmokeTest(unittest.TestCase):
             app._on_close()
 
 
+    def test_stage_strip_shows_numbers_results_and_compare(self):
+        root, app = make_app()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "line.png"
+                cv2.imwrite(str(p), golden.synthetic_images()["line"])
+                app.load_image(p)
+                self.assertTrue(pump(root, app, lambda: app.result is not None and app._workers == 0))
+                sm = app.session.stage_summaries()
+                txt = app.strip.buttons["trace"].cget("text")
+                self.assertTrue(txt.startswith("④ 뼈대·획"))
+                self.assertIn(sm["trace"], txt)
+                app.select_stage("dedupe")
+                root.update()
+                self.assertIn("→", app.view.subtitle.cget("text"))      # 설명 + 이전 대비 변화
+                shown = app.view.image
+                app.view.hold_compare(True)                             # 누르고 있는 동안 이전 단계
+                self.assertIsNot(app.view.image, shown)
+                self.assertTrue(app.view.title.cget("text").startswith("④"))   # ⑤의 이전 = ④
+                app.view.hold_compare(False)
+                self.assertIs(app.view.image, shown)
+        finally:
+            app._on_close()
+
+
 if __name__ == "__main__":
     unittest.main()

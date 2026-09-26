@@ -676,6 +676,42 @@ class SketchSession:
             s["simulation"] = self.sim["summary"] if self.sim else None
             return s
 
+    def stage_summaries(self):
+        """단계마다 만든 결과 한 줄 (단계 띠·큰 보기 안내용). 결과가 없으면 빈 글자."""
+        with self.lock:
+            ids = [st.id for st in stages.ALL_STAGES]
+            if not self.result:
+                return {i: "" for i in ids}
+            o, p, r = self.result["stages"], self.params, self.result
+
+            def pts(strokes):
+                return sum(len(x) for x in strokes)
+
+            h, w = r["base"].shape
+            t, pl = r["timing"], r["placement"]
+            n_stroke = sum(1 for e in self.table.values() if e["kind"] == "stroke")
+            n_cand = sum(1 for e in self.table.values() if e["kind"] == "candidate")
+            return {
+                "source": f"{w}×{h}px" + (" · 배경 제거" if p["rembg"] else ""),
+                "prep": f"블러 {p['blur_ksize']}px" + (f" · 미디언 {p['median_ksize']}" if p["median_ksize"] > 1 else ""),
+                "edges": f"경계 {int((o['edges']['edges'] > 0).sum()):,}px",
+                "trace": f"획 {len(o['trace']['strokes'])} · 버림 {len(o['trace']['discarded_trace'])}",
+                "dedupe": f"획 {len(o['dedupe']['strokes'])} · 조각 {len(o['dedupe']['discarded_dedupe'])} 제거",
+                "merge": f"획 {len(o['merge']['strokes'])}",
+                "simplify": f"획 {len(o['simplify']['strokes'])} · 점 {pts(o['simplify']['strokes']):,}",
+                "edit": f"획 {n_stroke} · 후보 {n_cand}" + (f" · 제안 {len(self.proposals)}" if self.proposals else ""),
+                "paper": f"{t['total_s'] / 60:.1f}분 · {pl['drawing_width_mm']:.0f}×{pl['drawing_height_mm']:.0f}mm",
+            }
+
+    def stage_change(self, stage_id):
+        """이전 단계 결과 → 이 단계 결과 (첫 단계는 빈 글자)."""
+        ids = [st.id for st in stages.ALL_STAGES]
+        k = ids.index(stage_id)
+        if k == 0 or not self.result:
+            return ""
+        sm = self.stage_summaries()
+        return f"{stages.stage_title(ids[k - 1])[0]} {sm[ids[k - 1]]} → {stages.stage_title(stage_id)[0]} {sm[stage_id]}"
+
     def render(self, kind, region_mm=None, numbered=False, max_px=1000, show_candidates=False, overlay=0.0):
         """에이전트·화면용 그림 (BGR). kind: original | 단계 id | edit | lines | strokes | paper"""
         with self.lock:
