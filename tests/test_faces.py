@@ -90,5 +90,64 @@ class DetectTest(unittest.TestCase):
         np.testing.assert_allclose(g.landmarks[0], [4, 7])
 
 
+def face_at(x, y, w, h):
+    return faces.Face(np.array([x, y, w, h], float), np.zeros((5, 2)), 0.9)
+
+
+class FrameTest(unittest.TestCase):
+    def test_bust_box_shape_and_position(self):
+        f = face_at(500, 300, 100, 130)
+        x0, y0, x1, y1 = faces.frame_box(f, "bust", 1156, 1440)
+        self.assertAlmostEqual(x1 - x0, 350, delta=1)                 # 폭 3.5w
+        self.assertAlmostEqual(y1 - y0, 437.5, delta=1)               # 높이 1.25 × 폭
+        self.assertAlmostEqual((x0 + x1) / 2, 550, delta=1)           # 얼굴 가운데
+        self.assertAlmostEqual(y0, 300 - 0.6 * 130, delta=1)          # 머리 위 여유
+
+    def test_face_box_is_square_around_face(self):
+        x0, y0, x1, y1 = faces.frame_box(face_at(500, 300, 100, 130), "face", 1156, 1440)
+        self.assertAlmostEqual(x1 - x0, 234, delta=1)                 # 1.8 × max(w, h)
+        self.assertAlmostEqual(y1 - y0, 234, delta=1)
+        self.assertAlmostEqual((x0 + x1) / 2, 550, delta=1)
+        self.assertAlmostEqual((y0 + y1) / 2, 365, delta=1)
+
+    def test_box_is_pushed_inside_image(self):
+        x0, y0, x1, y1 = faces.frame_box(face_at(-20, -30, 100, 130), "bust", 1156, 1440)
+        self.assertEqual((x0, y0), (0, 0))
+        self.assertAlmostEqual(x1 - x0, 350, delta=1)                 # 크기는 유지하고 밀어 넣음
+        x0, y0, x1, y1 = faces.frame_box(face_at(1100, 1400, 100, 130), "face", 1156, 1440)
+        self.assertEqual((x1, y1), (1156, 1440))
+
+    def test_box_larger_than_image_shrinks(self):
+        x0, y0, x1, y1 = faces.frame_box(face_at(100, 50, 300, 350), "bust", 800, 600)
+        self.assertTrue(0 <= x0 < x1 <= 800 and 0 <= y0 < y1 <= 600)
+
+    def test_auto_picks_bust_for_small_face(self):
+        kind, box, note = faces.choose_frame([face_at(500, 300, 230, 300)], 1156, 1440, 100, "auto")
+        self.assertEqual(kind, "bust")                                # 100 × 300/1440 = 20.8mm < 25
+        self.assertIsNotNone(box)
+        self.assertIn("상반신", note)
+        self.assertIn("21mm", note)
+
+    def test_auto_keeps_full_for_big_face_or_big_paper(self):
+        self.assertEqual(faces.choose_frame([face_at(400, 300, 300, 400)], 1156, 1440, 100, "auto"),
+                         ("full", None, ""))                          # 27.8mm
+        self.assertEqual(faces.choose_frame([face_at(500, 300, 230, 300)], 1156, 1440, 150, "auto")[:2],
+                         ("full", None))                              # 31mm
+
+    def test_auto_full_without_face_or_with_many(self):
+        self.assertEqual(faces.choose_frame([], 1156, 1440, 100, "auto"), ("full", None, ""))
+        two = [face_at(100, 100, 50, 60), face_at(600, 100, 50, 60)]
+        self.assertEqual(faces.choose_frame(two, 1156, 1440, 100, "auto")[:2], ("full", None))
+
+    def test_manual_choices(self):
+        f = [face_at(500, 300, 100, 130)]
+        self.assertEqual(faces.choose_frame(f, 1156, 1440, 100, "full"), ("full", None, ""))
+        kind, box, _ = faces.choose_frame(f, 1156, 1440, 100, "face")
+        self.assertEqual(kind, "face")
+        self.assertEqual(box, faces.frame_box(f[0], "face", 1156, 1440))
+        self.assertEqual(faces.choose_frame([], 1156, 1440, 100, "bust"),
+                         ("full", None, "얼굴을 찾지 못해 전체로 그립니다"))
+
+
 if __name__ == "__main__":
     unittest.main()
