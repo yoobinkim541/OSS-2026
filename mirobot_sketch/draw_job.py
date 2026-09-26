@@ -40,7 +40,7 @@ class DrawJob:
 
     # ---------------------------------------------------------------- 사람이 누르는 것
     def start(self, virtual=True, virtual_speed=20.0, pending=False):
-        """pending: 실물 확인 전 넓은 범위(±60mm) 허용 — ① 사전 검사부터 적용 (④에서 바꿀 수도 있음)."""
+        """pending: 실물 확인 전 넓은 범위(limits_pending_verification) 허용 — ① 사전 검사부터 적용 (④에서 바꿀 수도 있음)."""
         self._virtual, self._speed, self._pending = bool(virtual), float(virtual_speed), bool(pending)
         self.state = "preflight"      # 첫 이벤트 전에 창을 닫아도 '진행 중'으로 보이게 (스레드 시작 전에)
         self._thread = threading.Thread(target=self._run, daemon=True)

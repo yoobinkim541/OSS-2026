@@ -17,7 +17,7 @@ import numpy as np
 from . import draw_executor as de
 from . import edits
 from . import paper_mapping as pm
-from . import faces, paths, presets, stages
+from . import faces, limits, paths, presets, stages
 from . import sketch_pipeline as sp
 
 FACE_CROP_SIDE = 500     # 얼굴 세밀 처리용 조각의 긴 변 (px)
@@ -86,7 +86,7 @@ class SketchSession:
     # ------------------------------------------------------------ 설정
     def param_specs(self):
         """단계 정의의 조절 항목. box_mm 상한은 설정 파일의 실물 미확인 범위(±60mm -> 120)."""
-        plim = self.cfg["limits_pending_verification"]["max_abs_paper_x_mm"] * 2
+        plim = limits.pending_region(self.cfg).x_max * 2
         specs = dict(stages.PARAM_SPECS)
         specs["box_mm"] = dataclasses.replace(specs["box_mm"], hi=plim)
         return specs
@@ -196,7 +196,8 @@ class SketchSession:
         entry = self._raw(path, cache, rembg) if rembg else plain
         full = entry["full"]
         fh, fw = full.shape[:2]
-        kind, box, note = faces.choose_frame(found, fw, fh, box_mm, frame)
+        eff_mm = limits.effective_long_mm(limits.pending_region(self.cfg), box_mm, fw, fh)   # 영역에 맞춘 실제 크기
+        kind, box, note = faces.choose_frame(found, fw, fh, eff_mm, frame)
         key = (path, bool(rembg), box)
         if (key, kind, note) in frame_cache:
             return frame_cache[(key, kind, note)], key
@@ -242,7 +243,8 @@ class SketchSession:
             found = self._faces_cache.get(self.image_path)
         if "full" in entry and found is not None:     # 구도 틀은 검출해 둔 얼굴로 바로 계산 (종이 크기로도 바뀜)
             fh, fw = entry["full"].shape[:2]
-            box = faces.choose_frame(found, fw, fh, p["box_mm"], p["frame"])[1]
+            eff_mm = limits.effective_long_mm(limits.pending_region(self.cfg), p["box_mm"], fw, fh)
+            box = faces.choose_frame(found, fw, fh, eff_mm, p["frame"])[1]
             first = self.pipeline.dirty_from((self.image_path, bool(p["rembg"]), box), p)
         else:
             first = "source"
@@ -314,10 +316,9 @@ class SketchSession:
         r["strokes_px"], r["strokes_mm"] = strokes_px, strokes_mm
         lists = [[tuple(pt) for pt in s] for s in strokes_mm]
         r["timing"] = de.estimate_time(lists, self.cfg)
-        lim = self.cfg["limits"]["max_abs_paper_x_mm"]
-        plim = self.cfg["limits_pending_verification"]["max_abs_paper_x_mm"]
         r["paper"] = pm.render_paper_preview(strokes_mm, self.cfg["pen"].get("line_width_mm", 0.5), 4.0,
-                                             limit_mm=lim, pending_limit_mm=plim)
+                                             limit_mm=limits.executor_region(self.cfg),
+                                             pending_limit_mm=limits.pending_region(self.cfg))
         r["out_of_limits"] = len(de.check_limits(lists, self.cfg))
         r["out_of_pending"] = len(de.check_limits(lists, self.cfg, pending=True))
         self.sim = None
@@ -366,7 +367,8 @@ class SketchSession:
         ordered = sp.order_strokes(strokes)
         if refit or self.result.get("placement") is None:
             box = self.params["box_mm"]
-            _, self.result["placement"] = pm.pixels_to_paper(self._fit_strokes or strokes, box_mm=(box, box))
+            _, self.result["placement"] = pm.pixels_to_paper(self._fit_strokes or strokes, box_mm=(box, box),
+                                                             region=limits.pending_region(self.cfg))
         strokes_mm = [self.px_to_mm(s) for s in ordered]
         allp = np.vstack(strokes_mm)
         size = allp.max(axis=0) - allp.min(axis=0)
@@ -377,29 +379,29 @@ class SketchSession:
     # ------------------------------------------------------------ 좌표
     def mm_to_px(self, xy):
         x, y = _as_xy(xy)
-        lim = self.cfg["limits_pending_verification"]
-        if abs(x) > lim["max_abs_paper_x_mm"] or abs(y) > lim["max_abs_paper_y_mm"]:
-            raise SessionError(f"좌표 ({x:.1f}, {y:.1f})mm가 허용 범위 ±{lim['max_abs_paper_x_mm']:.0f}mm 밖입니다")
-        sc, cx, cy = self._xf()
-        return (x / sc + cx, -y / sc + cy)
+        if not limits.pending_region(self.cfg).contains(x, y):
+            raise SessionError(f"좌표 ({x:.1f}, {y:.1f})mm가 허용 범위(넓은 범위) 밖입니다")
+        sc, cx, cy, ox, oy = self._xf()
+        return ((x - ox) / sc + cx, -(y - oy) / sc + cy)
 
     def _xf(self):
-        """종이 배치의 (배율 mm/px, 중심 x, 중심 y) — 반올림하지 않은 값."""
+        """종이 배치의 (배율 mm/px, 중심 x, 중심 y, 종이 위치 x, y mm) — 반올림하지 않은 값."""
         pl = self.result["placement"]
         t = pl.get("transform")
         if t:
-            return t["scale"], t["cx"], t["cy"]
-        return pl["scale_mm_per_px"], pl["center_px"][0], pl["center_px"][1]
+            return t["scale"], t["cx"], t["cy"], t.get("ox", 0.0), t.get("oy", 0.0)
+        return pl["scale_mm_per_px"], pl["center_px"][0], pl["center_px"][1], 0.0, 0.0
 
     def px_to_mm(self, pts):
-        sc, cx, cy = self._xf()
+        sc, cx, cy, ox, oy = self._xf()
         p = np.asarray(pts, np.float64)
-        return np.column_stack([(p[:, 0] - cx) * sc, -(p[:, 1] - cy) * sc])
+        return np.column_stack([(p[:, 0] - cx) * sc + ox, -(p[:, 1] - cy) * sc + oy])
 
     def _region_px(self, region_mm):
         x0, y0, x1, y1 = [float(v) for v in region_mm]
-        sc, cx, cy = self._xf()
-        xs, ys = sorted((x0 / sc + cx, x1 / sc + cx)), sorted((-y0 / sc + cy, -y1 / sc + cy))
+        sc, cx, cy, ox, oy = self._xf()
+        xs = sorted(((x0 - ox) / sc + cx, (x1 - ox) / sc + cx))
+        ys = sorted((-(y0 - oy) / sc + cy, -(y1 - oy) / sc + cy))
         return xs[0], ys[0], xs[1], ys[1]
 
     # ------------------------------------------------------------ 편집 실행 (번호표 사본에)
@@ -737,8 +739,9 @@ class SketchSession:
         with self.lock:
             s = {"image": self.image_path, "image_type": self.image_type, "detail": self.detail,
                  "params": dict(self.params),
-                 "executor_limit_mm": self.cfg["limits"]["max_abs_paper_x_mm"] * 2,
-                 "pending_limit_mm": self.cfg["limits_pending_verification"]["max_abs_paper_x_mm"] * 2}
+                 "executor_limit_mm": limits.executor_region(self.cfg).x_max * 2,
+                 "pending_limit_mm": limits.pending_region(self.cfg).x_max * 2,
+                 "pending_limit_outline_mm": [list(p) for p in limits.pending_region(self.cfg).outline()]}
             s["stages"] = [{"id": st.id, "label": st.label, "params": {p.key: self.params[p.key] for p in st.params}}
                            for st in stages.ALL_STAGES]
             if self.result:

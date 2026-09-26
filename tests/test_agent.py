@@ -167,7 +167,7 @@ class SessionTest(SessionTestBase):
     def test_update_params_clamps_to_safe_range(self):
         s = self.new_session()
         applied = s.update_params({"box_mm": 500, "median_ksize": -3})
-        self.assertEqual(applied["box_mm"], 120)       # 실물 미확인 범위(±60mm)가 상한
+        self.assertEqual(applied["box_mm"], 250)       # 넓은 범위(실물 미확인) 폭 ±125mm가 상한
         self.assertEqual(applied["median_ksize"], 0)
 
 class EditSessionTest(SessionTestBase):
@@ -207,7 +207,7 @@ class EditSessionTest(SessionTestBase):
         s.propose_edits([{"op": "move_point", "id": sid, "index": 0, "to_mm": target}], apply_now=True)
         self.assertTrue(np.allclose(s.table[sid]["poly"][0], expected_px))
         with self.assertRaises(SessionError):
-            s.propose_edits([{"op": "move_point", "id": sid, "index": 0, "to_mm": [80, 0]}])   # 60mm 밖
+            s.propose_edits([{"op": "move_point", "id": sid, "index": 0, "to_mm": [0, 70]}])   # 넓은 범위 지붕(+57.5) 위
 
     def test_invalid_batch_changes_nothing(self):
         s = self.new_session()
@@ -322,10 +322,11 @@ class ReviewFixesTest(SessionTestBase):
         s = self.new_session()
         keep = self.strokes(s)[0]
         before = s.get_stroke(keep)["points_mm"]
-        s.propose_edits([{"op": "add_stroke", "points_mm": [[0, 0], [58, 58]]}], apply_now=True)
+        s.propose_edits([{"op": "add_stroke", "points_mm": [[0, 0], [100, -80]]}], apply_now=True)   # 넓은 범위 먼 곳
         self.assertEqual(s.get_stroke(keep)["points_mm"], before)
         added = max(i for i, e in s.table.items() if e["reason"] == "added")
-        self.assertAlmostEqual(s.get_stroke(added)["points_mm"][1][1], 58, delta=0.2)
+        self.assertAlmostEqual(s.get_stroke(added)["points_mm"][1][1], 100, delta=0.2)   # [번호, x, y]
+        self.assertAlmostEqual(s.get_stroke(added)["points_mm"][1][2], -80, delta=0.2)
 
     def test_rembg_result_of_previous_image_is_not_cached_for_new_image(self):
         from mirobot_sketch import session as session_mod

@@ -52,9 +52,10 @@ CARTESIAN_RE = re.compile(r"Cartesian coordinate\(XYZ RxRyRz\):\s*([-\d.]+),\s*(
 # ---------------------------------------------------------------------------
 
 def load_config(path=None):
+    from .limits import migrate
     path = path or paths.config_path()
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        return migrate(json.load(f))   # 설치판 사용자 폴더에 남은 예전 기본 넓은 범위(±60)는 새 영역으로
 
 
 def load_strokes(path):
@@ -76,13 +77,9 @@ def active_limits(cfg, pending=False):
 
 
 def check_limits(strokes, cfg, pending=False):
-    lim = active_limits(cfg, pending)
-    bad = []
-    for i, s in enumerate(strokes):
-        for x, y in s:
-            if abs(x) > lim["max_abs_paper_x_mm"] + 1e-6 or abs(y) > lim["max_abs_paper_y_mm"] + 1e-6:
-                bad.append((i, x, y))
-    return bad
+    from .limits import Region
+    region = Region.from_cfg(active_limits(cfg, pending))
+    return [(i, x, y) for i, s in enumerate(strokes) for x, y in s if not region.contains(x, y)]
 
 
 class Planner:
@@ -307,7 +304,7 @@ def preflight(strokes, cfg, pending=False, air=False):
     if bad:
         i, x, y = bad[0]
         hint = ("그림 크기를 줄이세요." if pending else
-                "그림 크기를 줄이거나, 실물 확인 전 넓은 범위(±60mm)를 쓰려면 '넓은 범위 허용'을 켜세요.")
+                "그림 크기를 줄이거나, 실물 확인 전 넓은 범위를 쓰려면 '넓은 범위 허용'을 켜세요.")
         raise DrawError("preflight", f"종이 허용 범위를 벗어난 점 {len(bad)}개 (예: 획 {i}, x={x:.1f}, y={y:.1f} mm)", hint)
     planner = Planner(cfg, air=air)
     return {"cmds": planner.plan(strokes), "timing": estimate_time(strokes, cfg), "planner": planner}
@@ -422,9 +419,10 @@ def main():
         return 1
 
     if args.pending_limits:
-        pl = cfg["limits_pending_verification"]
-        print(f"주의: 실물 미확인 확장 범위 ±{pl['max_abs_paper_x_mm']:.0f} x ±{pl['max_abs_paper_y_mm']:.0f} mm로 검사합니다 "
-              f"({pl['status']}). 범위 확인 시험에만 쓰세요.")
+        from .limits import pending_region
+        pl, r = cfg["limits_pending_verification"], pending_region(cfg)
+        print(f"주의: 실물 미확인 넓은 범위(좌우 ±{r.x_max:.0f}, 아래 {r.y_min:.0f} ~ 위 최대 {r.top(0):.0f}mm)로 검사합니다 "
+              f"({pl.get('status', '')}). 범위 확인 시험에만 쓰세요.")
     try:
         pre = preflight(strokes, cfg, args.pending_limits, args.air)
     except DrawError as e:

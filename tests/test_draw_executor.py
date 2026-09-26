@@ -7,6 +7,8 @@ import copy
 import json
 import sys
 import unittest
+
+import numpy as np
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -113,16 +115,23 @@ class SafetyOptionTest(unittest.TestCase):
         self.assertTrue(all(abs(x - contact) >= CFG["pen"]["up_clearance_mm"] - 1e-6 for x in xs))
 
     def test_pending_limits_only_with_flag(self):
-        border = [[(-60.0, -60.0), (60.0, -60.0), (60.0, 60.0), (-60.0, 60.0), (-60.0, -60.0)]]
-        self.assertTrue(de.check_limits(border, CFG))                  # 기본 ±50: 거부
-        self.assertFalse(de.check_limits(border, CFG, pending=True))   # 확장 ±60: 허용
-        self.assertTrue(de.check_limits([[(0.0, 0.0), (0.0, 61.0)]], CFG, pending=True))
+        wide = [[(-120.0, -80.0), (120.0, -80.0), (120.0, 44.0), (0.0, 57.0), (-120.0, 44.0), (-120.0, -80.0)]]
+        self.assertTrue(de.check_limits(wide, CFG))                    # 기본 ±50: 거부
+        self.assertFalse(de.check_limits(wide, CFG, pending=True))     # 넓은 범위(지붕 모양): 허용
+        self.assertTrue(de.check_limits([[(0.0, 0.0), (0.0, 58.0)]], CFG, pending=True))      # 지붕 위
+        self.assertTrue(de.check_limits([[(0.0, 0.0), (124.0, 44.0)]], CFG, pending=True))    # 끝은 더 낮음
 
     def test_border_test_file_matches_pending_limits(self):
-        path = Path(__file__).resolve().parent.parent / "trajectories" / "border-test-60mm.json"
+        from mirobot_sketch import limits
+        path = Path(__file__).resolve().parent.parent / "trajectories" / "border-test-wide.json"
         _, strokes = de.load_strokes(path)
         self.assertTrue(de.check_limits(strokes, CFG))
         self.assertFalse(de.check_limits(strokes, CFG, pending=True))
+        pts = np.array([p for s in strokes for p in s])
+        r = limits.pending_region(CFG)
+        self.assertAlmostEqual(pts[:, 0].max(), r.x_max)               # 테두리를 실제로 따라감
+        self.assertAlmostEqual(pts[:, 1].min(), r.y_min)
+        self.assertAlmostEqual(pts[:, 1].max(), r.top(0))
 
 
 class ExecuteTest(unittest.TestCase):

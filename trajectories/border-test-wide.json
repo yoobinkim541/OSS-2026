@@ -1,0 +1,114 @@
+{
+ "schema_version": 1,
+ "kind": "sketch_strokes",
+ "units": "mm",
+ "paper": {
+  "size": "A4",
+  "orientation": "landscape"
+ },
+ "coordinate_frame": {
+  "origin": "paper_center",
+  "x_axis": "paper_right_positive (viewed from the front of the paper)",
+  "y_axis": "paper_up_positive",
+  "robot_mapping": "done by robot/draw_executor.py using robot/drawing_config.json"
+ },
+ "created_local": "2026-09-26T21:00:00+09:00",
+ "placement": {
+  "alignment": "authored directly in paper mm",
+  "drawing_width_mm": 250.0,
+  "drawing_height_mm": 142.5
+ },
+ "source": {
+  "purpose": "넓은 범위(실물 미확인) 테두리 확인: 좌우 ±125, 아래 -85, 위는 지붕 모양(가운데 +57.5 -> 끝 +42.5). 1) --air --pending-limits 로 펜 없이 경로 확인 2) --pending-limits 로 펜 대고 그림. 위쪽 지붕이 B(J5) 한계에 가장 가까움 (시뮬레이션 최소 여유 5도 이상, tests/test_limits.py)."
+ },
+ "metrics": {
+  "stroke_count": 1
+ },
+ "strokes": [
+  {
+   "closed": true,
+   "points_xy_mm": [
+    [
+     -125.0,
+     -85.0
+    ],
+    [
+     125.0,
+     -85.0
+    ],
+    [
+     125.0,
+     42.5
+    ],
+    [
+     120.0,
+     45.0
+    ],
+    [
+     110.0,
+     47.5
+    ],
+    [
+     100.0,
+     50.0
+    ],
+    [
+     90.0,
+     52.5
+    ],
+    [
+     80.0,
+     55.0
+    ],
+    [
+     60.0,
+     55.0
+    ],
+    [
+     50.0,
+     57.5
+    ],
+    [
+     0.0,
+     57.5
+    ],
+    [
+     -50.0,
+     57.5
+    ],
+    [
+     -60.0,
+     55.0
+    ],
+    [
+     -80.0,
+     55.0
+    ],
+    [
+     -90.0,
+     52.5
+    ],
+    [
+     -100.0,
+     50.0
+    ],
+    [
+     -110.0,
+     47.5
+    ],
+    [
+     -120.0,
+     45.0
+    ],
+    [
+     -125.0,
+     42.5
+    ],
+    [
+     -125.0,
+     -85.0
+    ]
+   ]
+  }
+ ]
+}

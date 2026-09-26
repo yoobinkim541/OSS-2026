@@ -108,9 +108,9 @@ mirobot-draw out/photo.json --execute
 실행 결과는 `LOG/runs/`에 저장됩니다. 처음 실행할 때는 `trajectories/orientation-test-F.json`으로 좌우·상하 방향부터 확인하세요.
 
 - `--air` : 펜을 종이에 대지 않고 같은 경로를 따라갑니다(도달 범위·충돌 확인용).
-- `--pending-limits` : 실물 확인 전의 확장 범위(±60mm)로 검사합니다. 범위 확인 시험(`trajectories/border-test-60mm.json`)에만 씁니다.
+- `--pending-limits` : 실물 확인 전의 넓은 범위(도달 지도에 맞춘 지붕 모양, 좌우 ±125 · 아래 −85 · 위 +42.5~+57.5mm)로 검사합니다. 범위 확인 시험(`trajectories/border-test-wide.json`)과 큰 그림에 씁니다.
 
-그리기 범위를 ±50mm에서 ±60mm로 넓히는 절차는 `robot/drawing_config.json`의 `_limits_pending_note`를 따릅니다.
+**더 크게 그리기:** GUI의 "그리기 크기"를 최대 250mm까지 올릴 수 있습니다. 넓은 범위에 들어가도록 큰 그림은 조금 아래로 옮기고, 세로로 긴 그림은 위쪽 한계에 맞춰 줄입니다(예: 가로 사진 224×132mm, 정사각형에 가까운 그림 132×140mm). 넓은 범위는 시뮬레이션으로만 확인되어, 로봇으로 그릴 때 "넓은 범위(실물 미확인) 허용"을 체크해야 합니다. 실물 확인 절차는 `robot/drawing_config.json`의 `_limits_pending_note`와 [LOG](LOG/2026-09-26-bigger-drawing.md)를 따릅니다.
 
 ### 에이전트 패널 (대화로 편집)
 

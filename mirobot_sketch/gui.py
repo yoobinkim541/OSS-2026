@@ -35,6 +35,7 @@ except ImportError:  # 설치 안내 후 종료
     raise
 
 from . import draw_executor as de
+from . import limits
 from . import paper_mapping as pm
 from . import paths, presets, stages
 from . import sketch_pipeline as sp
@@ -252,9 +253,10 @@ class SketchApp:
         self.status = ctk.CTkLabel(c3, text="이미지를 열어 주세요.", font=font(12), text_color=ACCENT,
                                    wraplength=300, anchor="w", justify="left")
         self.status.pack(fill="x", padx=14, pady=(0, 12))
-        lim = self.cfg["limits"]["max_abs_paper_x_mm"] * 2
-        plim = self.cfg["limits_pending_verification"]["max_abs_paper_x_mm"] * 2
-        ctk.CTkLabel(c3, text=f"종이 미리보기: 파란 점선 {lim:.0f}mm = 실행기 허용 · 주황 점선 {plim:.0f}mm = 실물 확인 전",
+        lim = limits.executor_region(self.cfg).x_max * 2
+        plim = limits.pending_region(self.cfg).x_max * 2
+        ctk.CTkLabel(c3, text=f"종이 미리보기: 파란 점선 {lim:.0f}mm = 실행기 허용 · 주황 점선(최대 폭 {plim:.0f}mm) = "
+                              "넓은 범위(실물 확인 전, 위쪽이 낮은 지붕 모양)",
                      font=font(11), text_color=MUTED, wraplength=300, anchor="w", justify="left"
                      ).pack(fill="x", padx=14, pady=(0, 12))
 

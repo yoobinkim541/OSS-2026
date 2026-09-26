@@ -62,7 +62,7 @@ class DrawWindow(ctk.CTkToplevel):
         ctk.CTkCheckBox(opts, text="공중 모드 (펜을 대지 않고 경로만)", variable=self.air_var, font=font(12)
                         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=4)
         self.pending_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(opts, text="넓은 범위(±60mm) 허용", variable=self.pending_var, font=font(12)
+        ctk.CTkCheckBox(opts, text="넓은 범위(실물 미확인) 허용", variable=self.pending_var, font=font(12)
                         ).grid(row=1, column=2, sticky="w", pady=4)
         self.check_var = ctk.BooleanVar(value=False)
         self.check_box = ctk.CTkCheckBox(opts, text="종이·펜·주변을 확인했습니다", variable=self.check_var,

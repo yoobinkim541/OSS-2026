@@ -15,6 +15,8 @@ robot/drawing_config.json의 부호·중심 설정으로 처리합니다. CV 결
   - 획 전체의 경계 상자 중심을 종이 중심에 맞춘다.
   - 가로세로 비율을 유지하며 그리기 상자(box_width_mm x box_height_mm) 안에 넣는다.
   - 그리기 상자는 종이 안전 여백 안에 있어야 한다.
+  - region(허용 영역, limits.Region)을 주면: 종이 중심에 들어가지 않는 큰 그림은 가장 적게 아래로 옮기고,
+    그래도 안 되면 들어갈 만큼 줄인다 (로봇 팔은 위쪽 여유가 작음).
 """
 
 import json
@@ -37,7 +39,7 @@ def strokes_bbox(strokes):
 
 
 def pixels_to_paper(strokes_px, box_mm=DEFAULT_BOX_MM, paper_mm=A4_LANDSCAPE_MM,
-                    margin_mm=DEFAULT_MARGIN_MM):
+                    margin_mm=DEFAULT_MARGIN_MM, region=None):
     """픽셀 획들을 종이 중심 기준 mm 획들로 변환합니다.
 
     반환: (strokes_mm, placement) — placement에는 배율, 실제 그림 크기 등이 들어갑니다.
@@ -49,7 +51,7 @@ def pixels_to_paper(strokes_px, box_mm=DEFAULT_BOX_MM, paper_mm=A4_LANDSCAPE_MM,
     box_w, box_h = box_mm
     safe_w = paper_mm[0] - 2 * margin_mm
     safe_h = paper_mm[1] - 2 * margin_mm
-    if box_w > safe_w or box_h > safe_h:
+    if region is None and (box_w > safe_w or box_h > safe_h):
         raise ValueError(
             f"그리기 상자 {box_w}x{box_h}mm가 종이 안전 영역 {safe_w}x{safe_h}mm보다 큽니다."
         )
@@ -58,11 +60,18 @@ def pixels_to_paper(strokes_px, box_mm=DEFAULT_BOX_MM, paper_mm=A4_LANDSCAPE_MM,
     size = np.maximum(hi - lo, 1e-9)
     scale = min(box_w / size[0], box_h / size[1])  # mm per px, 비율 유지
     center = (lo + hi) / 2.0
+    ox = oy = 0.0
+    if region is not None:
+        pos = region.fit(size[0] * scale, size[1] * scale)
+        if pos is None:                              # 영역에 안 들어감: 들어갈 만큼 줄임
+            scale = region.max_scale(size[0], size[1])
+            pos = region.fit(size[0] * scale, size[1] * scale) or (0.0, 0.0)
+        ox, oy = pos
 
     strokes_mm = []
     for s in strokes_px:
-        x = (s[:, 0] - center[0]) * scale
-        y = -(s[:, 1] - center[1]) * scale  # 이미지 y(아래 +) -> 종이 y(위 +)
+        x = (s[:, 0] - center[0]) * scale + ox
+        y = -(s[:, 1] - center[1]) * scale + oy  # 이미지 y(아래 +) -> 종이 y(위 +)
         strokes_mm.append(np.column_stack([x, y]))
 
     placement = {
@@ -76,8 +85,9 @@ def pixels_to_paper(strokes_px, box_mm=DEFAULT_BOX_MM, paper_mm=A4_LANDSCAPE_MM,
         "drawing_height_mm": round(float(size[1] * scale), 3),
         "center_px": [round(float(center[0]), 3), round(float(center[1]), 3)],   # mm -> px 역변환용
         # 반올림하지 않은 변환 (세션의 mm<->px 계산용: 반올림 값을 쓰면 가장자리 점이 허용 범위를 0.0001mm 넘음)
-        "transform": {"scale": float(scale), "cx": float(center[0]), "cy": float(center[1])},
-        "alignment": "bounding_box_center_to_paper_center",
+        "transform": {"scale": float(scale), "cx": float(center[0]), "cy": float(center[1]), "ox": ox, "oy": oy},
+        "offset_mm": [ox, oy],   # 그림 중심의 종이 위치 (큰 그림은 아래로 옮김)
+        "alignment": "bounding_box_center_to_paper_center" if (ox, oy) == (0.0, 0.0) else "moved_down_into_reach",
     }
     return strokes_mm, placement
 
@@ -98,7 +108,8 @@ def render_paper_preview(strokes_mm, line_width_mm=0.5, px_per_mm=4.0, paper_mm=
     """A4 위에 실제 크기·펜 굵기로 그린 모습을 BGR 이미지로 만듭니다 (GUI 미리보기).
 
     - 종이: 흰 바탕, 회색 테두리
-    - limit_mm: 실행기 허용 범위(±mm) 파란 점선, pending_limit_mm: 실물 미확인 범위 주황 점선
+    - limit_mm: 실행기 허용 범위 파란 점선, pending_limit_mm: 실물 미확인 넓은 범위 주황 점선
+      (±mm 숫자 또는 limits.Region — Region이면 지붕 모양 테두리)
     - 선 굵기 = line_width_mm x px_per_mm (촘촘한 선이 실제로 뭉개지는지 볼 수 있음)
     """
     import cv2
@@ -110,8 +121,12 @@ def render_paper_preview(strokes_mm, line_width_mm=0.5, px_per_mm=4.0, paper_mm=
     def to_px(x, y):
         return int(round(cx + x * px_per_mm)), int(round(cy - y * px_per_mm))
 
-    def dashed_rect(half, color):
-        pts = [(-half, -half), (half, -half), (half, half), (-half, half), (-half, -half)]
+    def dashed_rect(area, color):
+        if hasattr(area, "outline"):
+            pts = area.outline()
+        else:
+            half = area
+            pts = [(-half, -half), (half, -half), (half, half), (-half, half), (-half, -half)]
         for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
             n = max(1, int(np.hypot(x1 - x0, y1 - y0) / 3))
             for k in range(0, n, 2):
