@@ -181,3 +181,32 @@ class ReachSimulationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewFixTest(unittest.TestCase):
+    def test_bundled_roof_is_concave_so_segments_stay_inside(self):
+        # 실행기는 꼭짓점만 검사 → 영역이 볼록해야 "꼭짓점이 안이면 선분도 안"이 성립
+        cfg = de.load_config(ROOT / "mirobot_sketch" / "data" / "drawing_config.json")
+        r = limits.pending_region(cfg)
+        roof = cfg["limits_pending_verification"]["roof_mm"]
+        slopes = [(y1 - y0) / (x1 - x0) for (x0, y0), (x1, y1) in zip(roof, roof[1:])]
+        self.assertTrue(all(b <= a + 1e-9 for a, b in zip(slopes, slopes[1:])), slopes)
+        pts = r.outline()
+        for a in pts:
+            for b in pts:
+                for t in np.linspace(0, 1, 21):
+                    x, y = np.add(a, np.subtract(b, a) * t)
+                    self.assertTrue(r.contains(x, y, eps=1e-6), (a, b, t))
+
+    def test_agent_schema_allows_big_drawings(self):
+        from mirobot_sketch.agent import tools
+        self.assertEqual(tools.param_schema()["box_mm"]["maximum"], 250)
+
+    def test_face_pen_width_uses_actual_drawing_size(self):
+        from mirobot_sketch import stages
+        cfg = de.load_config(ROOT / "mirobot_sketch" / "data" / "drawing_config.json")
+        prev = {"gray": np.zeros((800, 642), np.uint8), "region": limits.pending_region(cfg)}
+        p = {"pen_mm": 0.5, "box_mm": 250}
+        eff = limits.effective_long_mm(prev["region"], 250, 642, 800)          # 세로 그림: 약 141mm로 줄어듦
+        self.assertAlmostEqual(stages._face_pen_px(prev, p), 0.5 / (eff / 800))
+        self.assertAlmostEqual(stages._face_pen_px({"gray": prev["gray"]}, p), 0.5 / (250 / 800))   # 영역 모름

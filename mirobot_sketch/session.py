@@ -225,6 +225,7 @@ class SketchSession:
                              interpolation=cv2.INTER_CUBIC if sc > 1 else cv2.INTER_AREA)
             crops.append({"img": img, "scale": sc / k, "origin": np.array([(ox0 - x0) * k, (oy0 - y0) * k])})
         inputs = {"gray": gray, "color": color, "faces": work_faces, "face_crops": crops,
+                  "region": limits.pending_region(self.cfg),
                   "frame": {"kind": kind, "box_orig": box, "notice": note}}
         frame_cache[(key, kind, note)] = inputs
         return inputs, key

@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from . import faces as fc
+from . import limits
 from . import presets
 from . import sketch_pipeline as sp
 
@@ -160,12 +161,19 @@ def _face_strokes(crop, face, p, pen_px):
     return out
 
 
+def _face_pen_px(prev, p):
+    """펜 굵기(mm)를 작업 이미지 px로. 큰 세로 그림은 영역에 맞춰 요청(box_mm)보다 작게 그려지므로 실제 크기로 환산."""
+    h, w = prev["gray"].shape[:2]
+    region = prev.get("region")
+    long_mm = limits.effective_long_mm(region, p["box_mm"], w, h) if region is not None else p["box_mm"]
+    return p["pen_mm"] / (long_mm / max(h, w))
+
+
 def _run_face(prev, p):
     found = prev.get("faces") or []
     if not found or not p["face_detail"]:
         return {**prev, "discarded_face": [], "faces_used": 0, "uses_deps": False}
-    h, w = prev["gray"].shape[:2]
-    pen_px = p["pen_mm"] / (p["box_mm"] / max(h, w))
+    pen_px = _face_pen_px(prev, p)
     strokes, gone = list(prev["strokes"]), []
     for face, crop in zip(found, prev["face_crops"]):
         center, axes = fc.ellipse_of(face)
@@ -252,7 +260,8 @@ STAGES = (
 ALL_STAGES = STAGES + (
     Stage("edit", "편집", ()),
     Stage("paper", "순서·종이", (
-        ParamSpec("box_mm", "그리기 크기 (mm, 긴 변)", "int", 100, 30, 120, help="실행기 허용 범위는 설정 파일 기준"),)),
+        ParamSpec("box_mm", "그리기 크기 (mm, 긴 변)", "int", 100, 30, 250,
+                  help="100mm 넘게는 넓은 범위(실물 미확인): 큰 그림은 조금 아래로 옮기고 세로 그림은 줄여서 맞춤"),)),
 )
 _DESCS = {
     "source": "입력 사진 (긴 변 800px로 맞춤). 배경 제거를 켜면 인물만 남김",
