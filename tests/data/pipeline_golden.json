@@ -1,0 +1,146 @@
+{
+ "synthetic": {
+  "line#0": {
+   "count": 8,
+   "total_px": 5674.6,
+   "sha1": "dd054deb74e489459341672140b7316225e97d42"
+  },
+  "line#1": {
+   "count": 6,
+   "total_px": 2797.1,
+   "sha1": "c000f7db95c939c819363e51c1695af491979b25"
+  },
+  "line#2": {
+   "count": 8,
+   "total_px": 5558.1,
+   "sha1": "156a56f4c2e9af7a6eeb004352a2bac8ca6a0715"
+  },
+  "line#3": {
+   "count": 6,
+   "total_px": 2770.7,
+   "sha1": "da19778822fbe62f79c39a59f31d7123bb79f58f"
+  },
+  "line#4": {
+   "count": 8,
+   "total_px": 5568.8,
+   "sha1": "8066a95e227c627970de57c4822b59bd033b9e29"
+  },
+  "line#5": {
+   "count": 6,
+   "total_px": 2743.2,
+   "sha1": "54c6116ebd8ea0864179c5b7f1c47386d427a5d2"
+  },
+  "line#6": {
+   "count": 8,
+   "total_px": 5490.8,
+   "sha1": "fe6d04787142598cbc2dfcaa705918834cf1f802"
+  },
+  "line#7": {
+   "count": 2,
+   "total_px": 2654.9,
+   "sha1": "178fed5d38e3c185eb3e06945638716364660e9e"
+  },
+  "shade#0": {
+   "count": 5,
+   "total_px": 3065.7,
+   "sha1": "a01cc23e330596dfc999850e2a84797f6e0b6ef5"
+  },
+  "shade#1": {
+   "count": 3,
+   "total_px": 377.0,
+   "sha1": "e2d11998778a32847a2af5554cdaee81f98070d2"
+  },
+  "shade#2": {
+   "count": 5,
+   "total_px": 2977.4,
+   "sha1": "95712d76efa8f5be1425d1f6f97c2cbcb3adebfd"
+  },
+  "shade#3": {
+   "count": 3,
+   "total_px": 377.0,
+   "sha1": "e2d11998778a32847a2af5554cdaee81f98070d2"
+  },
+  "shade#4": {
+   "count": 4,
+   "total_px": 3006.4,
+   "sha1": "9ef4c95a6e89ab8a7d20fab1e1563729c9ee6c68"
+  },
+  "shade#5": {
+   "count": 2,
+   "total_px": 364.1,
+   "sha1": "177db73a0ac8c6f4e5d69258aa8176063ab95df7"
+  },
+  "shade#6": {
+   "count": 4,
+   "total_px": 2934.5,
+   "sha1": "45aae819621dfbe6e7d9b9fe92a110c38eb84672"
+  },
+  "shade#7": {
+   "count": 2,
+   "total_px": 364.1,
+   "sha1": "177db73a0ac8c6f4e5d69258aa8176063ab95df7"
+  }
+ },
+ "samples": {
+  "illust1_color.jpg#0": {
+   "count": 296,
+   "total_px": 22263.9,
+   "sha1": "a23c63be3b7a46dcf9dc487564e3f1668b4d4a0b"
+  },
+  "illust1_color.jpg#1": {
+   "count": 88,
+   "total_px": 9304.6,
+   "sha1": "357e3fb16e1ff7e94f180a3e55ff700f6bc5ca5e"
+  },
+  "illust2_color.jpg#0": {
+   "count": 485,
+   "total_px": 20685.4,
+   "sha1": "b39ec5012819215f6e63033e80faf63d67a0d8a6"
+  },
+  "illust2_color.jpg#1": {
+   "count": 48,
+   "total_px": 3836.8,
+   "sha1": "a6f1a49c85a9ddf4d1a80a580b0b8e85b54cf748"
+  },
+  "illust3_manga.jpg#0": {
+   "count": 166,
+   "total_px": 21968.7,
+   "sha1": "c48a818043815cd90daaa7f97e629fb5e9889bac"
+  },
+  "illust3_manga.jpg#1": {
+   "count": 89,
+   "total_px": 10670.9,
+   "sha1": "17b34c7193e67f7e3e3deb0f380c369da8e25cb2"
+  },
+  "photo1_mic.webp#0": {
+   "count": 285,
+   "total_px": 9444.8,
+   "sha1": "723fbfc33c26b9000af1a0de79b35dedfa07368c"
+  },
+  "photo1_mic.webp#1": {
+   "count": 93,
+   "total_px": 8269.1,
+   "sha1": "146d78cbd35326bcac1571f22cf3dc7fa80ef963"
+  },
+  "photo2_stage.jpg#0": {
+   "count": 370,
+   "total_px": 13427.8,
+   "sha1": "df9cd815ca86dc7bd54bb8cc46376f56b25631cf"
+  },
+  "photo2_stage.jpg#1": {
+   "count": 106,
+   "total_px": 9156.6,
+   "sha1": "92fb5247cccb6bdce7c1caab8b61e3fe7710e0b4"
+  },
+  "photo3_chair.jpg#0": {
+   "count": 304,
+   "total_px": 11816.3,
+   "sha1": "ca89a5a8a2ad14922398e199cc2a1d4905ca87e5"
+  },
+  "photo3_chair.jpg#1": {
+   "count": 95,
+   "total_px": 9912.4,
+   "sha1": "2b73d5e11063bda8896c6c49a08a9edfbe3b55dc"
+  }
+ }
+}

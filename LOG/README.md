@@ -20,6 +20,10 @@
 - [2026-09-24 — 입력 이미지 6장: 획 추출 비교와 3D 시뮬레이션 (스크린톤·순서 속도 개선)](./2026-09-24-image-set-simulation.md)
 - [2026-09-25 — CV 레이어·GUI 보강 (획 이어붙이기·이중선 제거·시간 추정·GUI)](./2026-09-25-cv-gui.md)
 - [2026-09-25 — 패키지화, Windows .exe, GitHub Actions](./2026-09-25-packaging.md)
+- [2026-09-25 — LLM 에이전트 사이드 패널 (OpenRouter / Claude Code / Codex)](./2026-09-25-agent-panel.md)
+- [2026-09-25 — GUI에서 RViz 3D 재생 바로 열기](./2026-09-25-gui-rviz.md)
+- [2026-09-26 — 입력 이미지를 컬러 원본으로 표시](./2026-09-26-color-original.md)
+- [2026-09-26 — 단계별 선 추출 파이프라인과 편집 제안](./2026-09-26-stage-pipeline.md)
 
 ## 주요 프로젝트 파일
 

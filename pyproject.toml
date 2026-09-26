@@ -31,6 +31,8 @@ dependencies = [
 [project.optional-dependencies]
 # 배경 제거: 첫 실행 때 AI 모델(약 170MB)을 내려받음
 rembg = ["rembg[cpu]>=2.0"]
+# 에이전트 패널: Claude Code / Codex 연결(MCP 서버), OpenRouter API, API 키 저장
+agent = ["mcp>=2", "keyring>=25", "requests>=2.31"]
 # Windows .exe 빌드
 build = ["pyinstaller>=6.0"]
 
@@ -47,7 +49,7 @@ mirobot-draw = "mirobot_sketch.draw_executor:main"
 mirobot-sim = "mirobot_sketch.mirobot_sim:main"
 
 [tool.setuptools]
-packages = ["mirobot_sketch"]
+packages = ["mirobot_sketch", "mirobot_sketch.agent"]
 
 [tool.setuptools.dynamic]
 version = { attr = "mirobot_sketch.__version__" }

@@ -13,6 +13,9 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 ROOT = Path(SPECPATH).parent  # noqa: F821  (spec 파일 안에서 제공되는 이름)
 
 datas = collect_data_files("customtkinter") + collect_data_files("mirobot_sketch")
+# GUI의 "RViz 3D로 보기"가 WSL에서 실행하는 스크립트 (ROS가 설치된 PC에서만 동작)
+datas += [(str(ROOT / "sim" / "run_rviz.sh"), "sim"), (str(ROOT / "sim" / "rviz_playback.py"), "sim"),
+          (str(ROOT / "sim" / "rviz" / "mirobot_sketch.rviz"), "sim/rviz")]
 excludes = ["rembg", "onnxruntime", "torch", "PyQt5", "PyQt6", "PySide6", "IPython", "jupyter", "pytest"]
 
 
@@ -22,7 +25,10 @@ def analysis(script):
         pathex=[str(ROOT)],
         datas=datas,
         # launch_cli.py는 하위 명령 모듈을 문자열 이름으로 불러오므로 직접 알려 줘야 함
-        hiddenimports=["PIL._tkinter_finder"] + collect_submodules("mirobot_sketch"),
+        # 에이전트: MCP SDK는 모듈을 동적으로 불러오고, keyring은 백엔드를 이름으로 찾음
+        hiddenimports=["PIL._tkinter_finder"] + collect_submodules("mirobot_sketch")
+        + collect_submodules("mcp", filter=lambda n: not n.startswith("mcp.cli"))  # mcp.cli는 typer가 없으면 종료함
+        + collect_submodules("mcp_types") + collect_submodules("keyring.backends"),
         excludes=excludes,
     )
 

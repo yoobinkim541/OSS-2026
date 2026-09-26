@@ -74,6 +74,7 @@ def pixels_to_paper(strokes_px, box_mm=DEFAULT_BOX_MM, paper_mm=A4_LANDSCAPE_MM,
         "scale_mm_per_px": round(float(scale), 6),
         "drawing_width_mm": round(float(size[0] * scale), 3),
         "drawing_height_mm": round(float(size[1] * scale), 3),
+        "center_px": [round(float(center[0]), 3), round(float(center[1]), 3)],   # mm -> px 역변환용
         "alignment": "bounding_box_center_to_paper_center",
     }
     return strokes_mm, placement

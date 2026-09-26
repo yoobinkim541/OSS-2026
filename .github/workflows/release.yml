@@ -27,8 +27,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-      - name: 설치 (rembg 제외)
-        run: python -m pip install -e ".[build]"
+      - name: 설치 (rembg 제외, 에이전트 포함)
+        run: python -m pip install -e ".[build,agent]"
       - name: 버전 확인 (태그 = __version__)
         run: |
           $ver = python -c "import mirobot_sketch; print(mirobot_sketch.__version__)"
@@ -48,6 +48,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           dist\MirobotSketch\mirobot.exe sim trajectories\orientation-test-F.json
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          # 에이전트 MCP 서버: 브리지 정보 없이 실행하면 안내 후 종료 코드 2 (모듈 누락이면 1)
+          dist\MirobotSketch\mirobot.exe mcp
+          if ($LASTEXITCODE -ne 2) { Write-Error "exe에 MCP 서버 모듈이 빠졌습니다 (exit $LASTEXITCODE)"; exit 1 }
 
       - name: 설치 프로그램 빌드 (Inno Setup)
         run: |

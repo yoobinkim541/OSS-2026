@@ -60,15 +60,37 @@ def load_gray(img_path, max_side=DEFAULT_MAX_SIDE):
     img = cv2.imdecode(data, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise ValueError(f"이미지를 읽을 수 없습니다: {img_path}")
+    raw = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
+    if raw is not None and raw.ndim == 3 and raw.shape[2] == 4:
+        # 투명 PNG: 그냥 흑백으로 읽으면 투명 부분이 검게 돼 선이 묻힘 -> 흰 배경에 합성 (load_color와 같게)
+        return cv2.cvtColor(load_color(img_path, max_side), cv2.COLOR_BGR2GRAY)
     return resize_max_side(img, max_side)
 
 
-def remove_background(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
-    """rembg로 배경을 제거하고 흰 배경 위에 합성한 회색조 이미지를 반환합니다.
+def load_color(img_path, max_side=DEFAULT_MAX_SIDE):
+    """화면 표시용 컬러 원본 (BGR). load_gray와 같은 크기로 맞춰 좌표가 일치합니다.
+    투명 PNG는 흰 배경 위에 합성합니다 (그냥 읽으면 투명 부분이 검게 보임)."""
+    data = np.fromfile(str(img_path), dtype=np.uint8)
+    img = cv2.imdecode(data, cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise ValueError(f"이미지를 읽을 수 없습니다: {img_path}")
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    elif img.shape[2] == 4:
+        a = img[:, :, 3:4].astype(np.float32) / 255.0
+        img = (img[:, :, :3] * a + 255 * (1 - a)).astype(np.uint8)
+    if img.dtype != np.uint8:   # 16비트 PNG 등
+        img = cv2.convertScaleAbs(img, alpha=255.0 / max(1, int(img.max())))
+    return resize_max_side(img, max_side)
+
+
+def remove_background_bgr(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
+    """rembg로 배경을 제거하고 흰 배경 위에 합성한 컬러(BGR) 이미지를 반환합니다.
     rembg는 선택 기능이라 필요할 때만 import 합니다 (첫 실행 시 모델 다운로드).
 
     cache_dir를 주면 결과를 원본 파일 내용의 해시 이름으로 저장해 두고 재사용합니다
-    (rembg는 이미지 한 장에 약 1분 — GUI를 다시 열 때마다 기다리지 않도록)."""
+    (rembg는 이미지 한 장에 약 1분 — GUI를 다시 열 때마다 기다리지 않도록).
+    색 차이(Lab) 선 검출도 쓸 수 있게 컬러로 저장합니다 (예전 흑백 캐시 rembg_*.png는 쓰지 않음)."""
     import hashlib
     from pathlib import Path
 
@@ -76,9 +98,9 @@ def remove_background(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
         data = f.read()
     cache_file = None
     if cache_dir:
-        cache_file = Path(cache_dir) / f"rembg_{hashlib.sha1(data).hexdigest()[:16]}.png"
+        cache_file = Path(cache_dir) / f"rembg_bgr_{hashlib.sha1(data).hexdigest()[:16]}.png"
         if cache_file.exists():
-            cached = cv2.imdecode(np.fromfile(str(cache_file), np.uint8), cv2.IMREAD_GRAYSCALE)
+            cached = cv2.imdecode(np.fromfile(str(cache_file), np.uint8), cv2.IMREAD_COLOR)
             if cached is not None:
                 return resize_max_side(cached, max_side)
 
@@ -93,11 +115,17 @@ def remove_background(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
 
     fg = Image.open(io.BytesIO(remove(data))).convert("RGBA")
     white_bg = Image.new("RGBA", fg.size, (255, 255, 255, 255))
-    composited = np.array(Image.alpha_composite(white_bg, fg).convert("L"))
+    rgb = np.array(Image.alpha_composite(white_bg, fg).convert("RGB"))
+    composited = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
     if cache_file is not None:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cv2.imencode(".png", composited)[1].tofile(str(cache_file))
     return resize_max_side(composited, max_side)
+
+
+def remove_background(img_path, max_side=DEFAULT_MAX_SIDE, cache_dir=None):
+    """remove_background_bgr의 흑백판 (명령줄 make_strokes용)."""
+    return cv2.cvtColor(remove_background_bgr(img_path, max_side, cache_dir), cv2.COLOR_BGR2GRAY)
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +156,29 @@ def compute_dark_mask(gray_img, blur_ksize=5, threshold=None):
         _, mask = cv2.threshold(blurred, float(threshold), 255, cv2.THRESH_BINARY_INV)
     # 작은 점 잡음 제거
     return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+
+
+LAB_AB_GAIN = 2.0  # a·b 채널은 값 범위가 좁아(128 중심) 대비를 늘려 같은 임계값을 씀
+
+
+def compute_edges_lab(bgr_img, canny_low=50, canny_high=150, blur_ksize=5):
+    """색 차이 선 검출: Lab의 L·a·b 채널마다 Canny를 적용해 합칩니다.
+
+    흑백 변환은 밝기가 비슷한 두 색(예: 주황 배경과 머리카락)의 경계를 지워 버립니다.
+    a(초록↔빨강)·b(파랑↔노랑) 채널은 밝기가 같아도 색이 다르면 값이 달라 경계가 남습니다.
+    """
+    k = int(blur_ksize)
+    k = k if k % 2 == 1 else k + 1
+    lab = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2LAB)
+    out = np.zeros(bgr_img.shape[:2], np.uint8)
+    for c in range(3):
+        ch = lab[:, :, c]
+        if c > 0:
+            ch = np.clip(128 + (ch.astype(np.float32) - 128) * LAB_AB_GAIN, 0, 255).astype(np.uint8)
+        if k > 1:
+            ch = cv2.GaussianBlur(ch, (k, k), 0)
+        out |= cv2.Canny(ch, float(canny_low), float(canny_high))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +293,7 @@ def neighbor_count(skel):
     return cv2.filter2D(skel.astype(np.float32), -1, k, borderType=cv2.BORDER_CONSTANT).astype(np.int32)
 
 
-def trace_strokes(edges, min_length_px=15, spur_px=6):
+def trace_strokes(edges, min_length_px=15, spur_px=6, discarded=None):
     """엣지 이미지 -> 한 번씩만 지나가는 획 리스트.
 
     잡음 제거는 두 단계로 합니다.
@@ -250,12 +301,18 @@ def trace_strokes(edges, min_length_px=15, spur_px=6):
          (획 조각 하나하나에 적용하면 글자처럼 분기점이 많은 선이 잘게 끊겨 사라짐)
       2. spur_px: 한쪽 끝이 허공이고 다른 끝이 분기점인 짧은 잔가지(골격화 부작용) 제거.
     분기점 사이의 1~2px짜리 연결 조각도 버립니다 (종이 위에서 0.5mm 미만).
+    discarded가 list면 버린 조각을 (점 배열, 이유)로 추가합니다: "small"(작은 덩어리), "spur"(잔가지).
     """
     skel = skeletonize_edges(edges)
     n, labels, stats, _ = cv2.connectedComponentsWithStats(skel.astype(np.uint8), connectivity=8)
     keep = stats[:, cv2.CC_STAT_AREA] >= min_length_px
     keep[0] = False  # 배경
-    skel = keep[labels]
+    kept = keep[labels]
+    if discarded is not None:
+        for s in trace_skeleton(skel & ~kept):
+            if len(s) >= 2:
+                discarded.append((np.asarray(s), "small"))
+    skel = kept
 
     deg = neighbor_count(skel)
     out = []
@@ -267,6 +324,8 @@ def trace_strokes(edges, min_length_px=15, spur_px=6):
             end_a = deg[s[0][1], s[0][0]] == 1
             end_b = deg[s[-1][1], s[-1][0]] == 1
             if end_a != end_b and length < spur_px:
+                if discarded is not None:
+                    discarded.append((np.asarray(s), "spur"))
                 continue
         out.append(s)
     return out
@@ -282,7 +341,7 @@ def _densify(s):
     return np.round(np.array(out)).astype(np.int32)
 
 
-def dedupe_strokes(strokes, shape, dist_px=4, min_keep_px=8, overlap_px=2):
+def dedupe_strokes(strokes, shape, dist_px=4, min_keep_px=8, overlap_px=2, discarded=None):
     """이미 그린 선과 dist_px 안에서 겹치는 부분을 지웁니다 (이중선 제거).
 
     Canny는 굵은 선의 양쪽 경계를 각각 잡아 한 선을 두 줄로 만듭니다. 펜 굵기
@@ -295,6 +354,7 @@ def dedupe_strokes(strokes, shape, dist_px=4, min_keep_px=8, overlap_px=2):
       overlap_px만큼 겹치게 남겨 끊김을 막음).
     엣지를 부풀려 합치는 방식은 가까운 선들이 세포 모양 그물로 뭉쳐 눈·입이 망가져
     쓰지 않았습니다 (LOG 참고).
+    discarded가 list면 겹쳐서 빠진 구간을 (점 배열, "overlap")으로 추가합니다.
     """
     order = sorted(range(len(strokes)), key=lambda i: -polyline_length(strokes[i]))
     occ = np.zeros(shape[:2], np.uint8)
@@ -326,6 +386,18 @@ def dedupe_strokes(strokes, shape, dist_px=4, min_keep_px=8, overlap_px=2):
             if b - a >= min_keep_px:
                 out.append(pts[a:b])
             k = j
+        if discarded is not None:
+            k = 0
+            while k < n:
+                if free[k]:
+                    k += 1
+                    continue
+                j = k
+                while j < n and not free[j]:
+                    j += 1
+                if j - k >= 2:
+                    discarded.append((pts[k:j], "overlap"))
+                k = j
     return out
 
 
@@ -545,23 +617,25 @@ def run_pipeline(gray_img, canny_low=50, canny_high=150, blur_ksize=5,
     merge_join_px: 0이 아니면 끝점이 이 거리 안에서 만나는 획을 이어 붙여 펜 올림을
                    줄인다. 기본 4px은 100mm로 그릴 때 약 0.5mm(펜 굵기 수준).
     """
-    if median_ksize and median_ksize > 1:
-        k = int(median_ksize)
-        gray_img = cv2.medianBlur(gray_img, k if k % 2 == 1 else k + 1)
-    if line_source == "dark":
-        edges = compute_dark_mask(gray_img, blur_ksize)
-    else:
-        edges = compute_edges(gray_img, canny_low, canny_high, blur_ksize)
     if method == "contour":
+        if median_ksize and median_ksize > 1:
+            k = int(median_ksize)
+            gray_img = cv2.medianBlur(gray_img, k if k % 2 == 1 else k + 1)
+        edges = (compute_dark_mask(gray_img, blur_ksize) if line_source == "dark"
+                 else compute_edges(gray_img, canny_low, canny_high, blur_ksize))
         raw = extract_strokes_contour(edges, min_length_px)
-    else:
-        raw = trace_strokes(edges, min_length_px)
-        if dedupe_px:
-            raw = dedupe_strokes(raw, edges.shape, dedupe_px)
-        if merge_join_px:
-            raw = merge_strokes(raw, merge_join_px)
-    strokes = order_strokes(simplify_strokes(raw, epsilon_px))
-    return edges, strokes
+        return edges, order_strokes(simplify_strokes(raw, epsilon_px))
+
+    from .stages import Pipeline, default_params   # stages가 이 모듈을 import하므로 함수 안에서
+
+    params = {**default_params(), "median_ksize": median_ksize or 0, "blur_ksize": blur_ksize,
+              "edge_mode": "dark" if line_source == "dark" else "luma",
+              "canny_low": canny_low, "canny_high": canny_high, "min_length_px": min_length_px,
+              "spur_px": 6, "dedupe_px": dedupe_px or 0, "merge_join_px": merge_join_px or 0,
+              "epsilon_px": epsilon_px}
+    color = cv2.cvtColor(gray_img, cv2.COLOR_GRAY2BGR)
+    out = Pipeline().run({"gray": gray_img, "color": color}, None, params)["simplify"]
+    return out["edges"], order_strokes(out["strokes"])
 
 
 def draw_strokes_image(strokes, shape, thickness=1):
