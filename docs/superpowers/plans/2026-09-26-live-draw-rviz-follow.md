@@ -451,8 +451,8 @@ class VirtualLinkTest(unittest.TestCase):
         lat = CFG["timing"]["assumed_command_latency_s"]      # 기대값 = 명령마다 (거리/속도 + 지연) / 배속
         pos, expected = VirtualMirobotLink(CFG).pos, 0.0
         for line, _ in cmds:
-            xyz = tuple(float(v) for v in re.search(r"X([-\\d.]+) Y([-\\d.]+) Z([-\\d.]+)", line).groups())
-            feed = float(re.search(r"F([\\d.]+)", line).group(1))
+            xyz = tuple(float(v) for v in re.search(r"X([-\d.]+) Y([-\d.]+) Z([-\d.]+)", line).groups())
+            feed = float(re.search(r"F([\d.]+)", line).group(1))
             expected += (sum((a - b) ** 2 for a, b in zip(xyz, pos)) ** 0.5 / (feed / 60) + lat) / 50
             pos = xyz
         self.assertEqual(result["result"], "completed")
