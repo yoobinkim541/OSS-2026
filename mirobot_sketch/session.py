@@ -134,7 +134,8 @@ class SketchSession:
 
     # ------------------------------------------------------------ 실패하면 되돌리기
     _STATE = ("result", "table", "next_id", "book", "pending", "proposals", "_groups", "_group_seq", "history",
-              "edit_log", "notice", "_last_simplify", "unapplied", "sim", "_fit_strokes", "proposal_epoch")
+              "edit_log", "notice", "_last_simplify", "unapplied", "sim", "_fit_strokes", "proposal_epoch",
+              "_frame_box")
 
     def _snapshot(self):
         snap = {k: getattr(self, k) for k in self._STATE}

@@ -122,6 +122,21 @@ class FaceSessionTest(unittest.TestCase):
         self.assertEqual(s.history, [])
         self.assertIn("구도", s.notice)
 
+    def test_failed_run_restores_frame_box(self):
+        # 새 구도 계산이 실패하면 틀도 되돌려야 함 (아니면 다음 계산이 멀쩡한 편집을 지우거나 옛 좌표로 다시 씀)
+        s = self.session([SMALL])
+        s.run_current()
+        self.delete_one(s)
+        s.update_params({"frame": "full"})
+        with mock.patch.object(s, "_refresh_drawing", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                s.run_current()
+        self.assertEqual(s.result["frame"]["kind"], "bust")                # 결과는 이전(상반신) 그대로
+        s.update_params({"frame": "auto"})
+        s.run_current()
+        self.assertTrue(s.book["removed"])                                 # 같은 틀 → 편집 유지
+        self.assertNotIn("초기화", s.notice)
+
     def test_dirty_stages_sees_frame_change_from_paper_size(self):
         s = self.session([SMALL])
         s.run_current()
